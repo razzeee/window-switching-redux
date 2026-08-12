@@ -88,6 +88,28 @@ The first milestone should approximate the mockup's hierarchy rather than chase 
 - Entrance and exit animate between desktop positions and switcher positions.
 - Input and activation never wait for animation completion.
 
+### Mockup-Faithful Composition
+
+The switcher must preserve the initial mockup's floating-window visual language. It does not use a panel, card background, persistent app-group border, or other enclosing switcher chrome. Window previews float directly over the recognizable desktop.
+
+Direct window targets receive layout priority and occupy the upper portion of the usable stage. For one through four direct targets, arrange the previews as a balanced gallery rather than one horizontal strip. Preserve each window's aspect ratio and use the available width and height without enlarging any preview beyond a useful source-relative size.
+
+App groups occupy the lower portion as loose clusters. Windows within a group retain app-local MRU order, overlap by approximately 12–18 percent, and stack with the newer window above older windows. The overlap must leave enough visible and reactive area for every grouped window target. Each cluster has a large persistent application icon anchored beneath it, matching the mockup. The icon and uncovered cluster area activate the app group target. No visible frame encloses the cluster.
+
+The complete composition uses one deterministic scale that fits the direct gallery and all app clusters inside the usable work area. Direct targets retain priority, but every grouped target remains visible. At high counts, continue shrinking the complete composition rather than scrolling, clipping, or dropping targets.
+
+Only the selected target shows a pill-shaped label. A direct or grouped window target shows its title; an app group target shows the application name. Selection uses a restrained accent outline. Unselected targets are neither dimmed nor rearranged.
+
+### Transform Animation
+
+Every available live clone begins at its source actor's exact stage-space geometry and animates to its assigned preview geometry over approximately 220 milliseconds using an ease-out curve. Clone geometry remains aspect-preserving throughout the transform. Attached-dialog clones keep their source-relative position and scale within the parent composition.
+
+Application icons, the selected outline, and the selected label fade in during the final third of the entrance. Keyboard selection is active immediately; traversal changes only selection styling and never rearranges the frozen composition.
+
+Commit and cancel release input immediately, then animate every surviving clone from its current transform toward its current source geometry over approximately 180 milliseconds. If exit interrupts entrance, it starts from the clone's interpolated geometry rather than jumping to either endpoint. Activation never waits for either animation. Animations-disabled mode applies destination geometry immediately and completes cleanup synchronously.
+
+Source window actors remain visible and unmodified. A source actor disappearing invalidates only its clone. Session disable, system-modal interruption, and target-set exhaustion cancel all transitions and synchronously destroy the animation layer.
+
 ## Architecture
 
 `extension.js` remains a small lifecycle entry point. It creates one keybinding controller in `enable()` and destroys it before restoring the stock handlers in `disable()`.
@@ -149,6 +171,9 @@ The behavioral prototype is ready for daily use when:
 - Escape, quick modifier release, pointer activation, extension disable, and system-modal interruption restore the desktop cleanly.
 - Repeated enable/disable cycles leave stock switching functional.
 - The entire frozen target set remains visible at high window counts, with keyboard traversal remaining usable when pointer precision degrades.
+- One through four direct targets form a balanced, aspect-preserving upper gallery rather than a horizontal strip.
+- Eligible applications appear as unframed, slightly overlapping lower clusters with persistent app icons, matching the initial mockup's hierarchy.
+- Entrance transforms clones from exact source geometry; exit reverses from current transforms without delaying activation or leaking transitions.
 - A daily-use tester can run it without Shell restarts, persistent visual corruption, or excessive journal logging.
 
 ## Out Of Scope
