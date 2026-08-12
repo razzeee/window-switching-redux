@@ -1,0 +1,38 @@
+.window-switching-redux {
+  background-color: transparent;
+}
+
+.switcher-target {
+  border: 3px solid transparent;
+  border-radius: 12px;
+  padding: 4px;
+}
+
+.switcher-target:selected {
+  border-color: -st-accent-color;
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.7);
+}
+
+.switcher-preview {
+  background-color: rgba(20, 20, 20, 0.45);
+  border-radius: 8px;
+}
+
+.switcher-preview-unavailable {
+  background-color: rgba(40, 40, 40, 0.85);
+}
+
+.switcher-window-title,
+.switcher-app-name {
+  color: white;
+  background-color: rgba(0, 0, 0, 0.8);
+  border-radius: 8px;
+  padding: 4px 10px;
+  font-weight: bold;
+}
+
+.switcher-app-icon {
+  background-color: rgba(0, 0, 0, 0.7);
+  border-radius: 8px;
+  padding: 6px;
+}

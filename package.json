@@ -1,0 +1,9 @@
+{
+  "name": "window-switching-redux",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/windowModel.test.js",
+    "pack": "gnome-extensions pack . --force --out-dir dist --extra-source=windowModel.js --extra-source=switcherController.js --extra-source=switcherSession.js --extra-source=switcherView.js"
+  }
+}
