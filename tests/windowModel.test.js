@@ -7,7 +7,11 @@ import test from 'node:test';
 
 import {
     buildTraversal,
+    getGroupIndices,
     getInitialSelection,
+    getScopedRemovalSelection,
+    getTopLevelIndices,
+    moveInScope,
     moveSelection,
     removeWindowFromTraversal,
 } from '../windowModel.js';
@@ -60,6 +64,87 @@ test('canonical mixed traversal has the exact target sequence', () => {
         'Files group', 'F1 grouped', 'F2 grouped', 'F3 grouped',
         'Text Editor group', 'T1 grouped', 'T2 grouped',
     ]);
+});
+
+test('top-level navigation excludes grouped windows', () => {
+    const targets = buildTraversal([
+        record('F1', 'Files'), record('T1', 'Text Editor'), record('F2', 'Files'),
+        record('B1', 'Browser'), record('T2', 'Text Editor'), record('F3', 'Files'),
+    ], 4);
+
+    assert.deepEqual(getTopLevelIndices(targets).map(index => labels([targets[index]])[0]), [
+        'F1 direct', 'T1 direct', 'F2 direct', 'B1 direct',
+        'Files group', 'Text Editor group',
+    ]);
+});
+
+test('group navigation contains only app-local grouped windows', () => {
+    const targets = buildTraversal([
+        record('F1', 'Files'), record('T1', 'Text Editor'), record('F2', 'Files'),
+        record('B1', 'Browser'), record('T2', 'Text Editor'), record('F3', 'Files'),
+    ], 4);
+
+    assert.deepEqual(getGroupIndices(targets, apps.Files).map(index => labels([targets[index]])[0]), [
+        'F1 grouped', 'F2 grouped', 'F3 grouped',
+    ]);
+});
+
+test('scoped movement wraps within the provided target indices', () => {
+    const scope = Object.freeze([4, 7, 10]);
+
+    assert.equal(moveInScope(4, 1, scope), 7);
+    assert.equal(moveInScope(10, 1, scope), 4);
+    assert.equal(moveInScope(4, -1, scope), 10);
+});
+
+test('scoped removal skips grouped representations at top level', () => {
+    const targets = buildTraversal([
+        record('F1', 'Files'), record('T1', 'Text Editor'), record('F2', 'Files'),
+        record('B1', 'Browser'), record('T2', 'Text Editor'), record('F3', 'Files'),
+    ], 4);
+    const removedIndex = targets.findIndex(target =>
+        target.kind === 'direct-window' && target.window === windows.B1);
+    const result = removeWindowFromTraversal(targets, removedIndex, windows.B1, 1);
+    const selectedIndex = getScopedRemovalSelection(
+        targets,
+        result.targets,
+        removedIndex,
+        1,
+        getTopLevelIndices(targets),
+        getTopLevelIndices(result.targets));
+
+    assert.equal(result.targets[selectedIndex].kind, 'app-group');
+    assert.equal(result.targets[selectedIndex].application, apps.Files);
+});
+
+test('scoped removal advances within an entered group', () => {
+    const targets = buildTraversal([
+        record('F1', 'Files'), record('T1', 'Text Editor'), record('F2', 'Files'),
+        record('B1', 'Browser'), record('T2', 'Text Editor'), record('F3', 'Files'),
+    ], 4);
+    const removedIndex = targets.findIndex(target =>
+        target.kind === 'grouped-window' && target.window === windows.F2);
+    const result = removeWindowFromTraversal(targets, removedIndex, windows.F2, 1);
+    const selectedIndex = getScopedRemovalSelection(
+        targets,
+        result.targets,
+        removedIndex,
+        1,
+        getGroupIndices(targets, apps.Files),
+        getGroupIndices(result.targets, apps.Files));
+
+    assert.equal(result.targets[selectedIndex].window, windows.F3);
+});
+
+test('reverse invocation starts at the final top-level target', () => {
+    const targets = buildTraversal([
+        record('F1', 'Files'), record('T1', 'Text Editor'), record('F2', 'Files'),
+        record('B1', 'Browser'), record('T2', 'Text Editor'), record('F3', 'Files'),
+    ], 4);
+
+    const selectedIndex = getInitialSelection(targets, windows.F1, -1);
+    assert.equal(targets[selectedIndex].kind, 'app-group');
+    assert.equal(targets[selectedIndex].application, apps['Text Editor']);
 });
 
 test('a recent single-window application receives no app group', () => {

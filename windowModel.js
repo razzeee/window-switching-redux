@@ -55,14 +55,67 @@ export function buildTraversal(windowRecords, recentLimit) {
 }
 
 export function getInitialSelection(targets, startingWindow, direction) {
-    if (targets.length === 0)
+    const topLevelIndices = getTopLevelIndices(targets);
+    if (topLevelIndices.length === 0)
         return -1;
     if (direction < 0)
-        return targets.length - 1;
+        return topLevelIndices.at(-1);
 
     const startingIndex = targets.findIndex(target =>
         target.kind === 'direct-window' && target.window === startingWindow);
-    return startingIndex === -1 ? 0 : moveSelection(startingIndex, 1, targets.length);
+    return startingIndex === -1
+        ? topLevelIndices[0]
+        : moveInScope(startingIndex, 1, topLevelIndices);
+}
+
+export function getTopLevelIndices(targets) {
+    return Object.freeze(targets.flatMap((target, index) =>
+        target.kind === 'grouped-window' ? [] : [index]));
+}
+
+export function getGroupIndices(targets, application) {
+    return Object.freeze(targets.flatMap((target, index) =>
+        target.kind === 'grouped-window' && target.application === application
+            ? [index]
+            : []));
+}
+
+export function moveInScope(selectedIndex, direction, indices) {
+    if (indices.length === 0)
+        return -1;
+
+    const position = indices.indexOf(selectedIndex);
+    if (position === -1)
+        return direction < 0 ? indices.at(-1) : indices[0];
+    return indices[moveSelection(position, direction, indices.length)];
+}
+
+export function getScopedRemovalSelection(
+    previousTargets, targets, selectedIndex, direction, previousIndices, indices) {
+    if (indices.length === 0)
+        return -1;
+
+    const selectedTarget = previousTargets[selectedIndex];
+    const retainedIndex = indices.find(index =>
+        targetsMatch(targets[index], selectedTarget));
+    if (retainedIndex !== undefined)
+        return retainedIndex;
+
+    const selectedPosition = previousIndices.indexOf(selectedIndex);
+    if (selectedPosition === -1)
+        return direction < 0 ? indices.at(-1) : indices[0];
+
+    for (let offset = 1; offset < previousIndices.length; offset++) {
+        const candidatePosition = moveSelection(
+            selectedPosition, direction * offset, previousIndices.length);
+        const candidate = previousTargets[previousIndices[candidatePosition]];
+        const survivorIndex = indices.find(index =>
+            targetsMatch(targets[index], candidate));
+        if (survivorIndex !== undefined)
+            return survivorIndex;
+    }
+
+    return direction < 0 ? indices.at(-1) : indices[0];
 }
 
 export function moveSelection(selectedIndex, direction, targetCount) {

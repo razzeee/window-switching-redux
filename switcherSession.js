@@ -11,8 +11,11 @@ import St from 'gi://St';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {
+    getGroupIndices,
     getInitialSelection,
-    moveSelection,
+    getScopedRemovalSelection,
+    getTopLevelIndices,
+    moveInScope,
     removeWindowFromTraversal,
 } from './windowModel.js';
 import {SwitcherView} from './switcherView.js';
@@ -33,6 +36,7 @@ class SwitcherSession extends St.Widget {
 
         this._targets = targets;
         this._selectedIndex = getInitialSelection(targets, startingWindow, direction);
+        this._enteredApplication = null;
         this._lastDirection = direction;
         this._modifierMask = primaryModifier(modifierMask);
         this._timestamp = timestamp;
@@ -113,8 +117,37 @@ class SwitcherSession extends St.Widget {
             return;
 
         this._lastDirection = direction;
-        this._selectedIndex = moveSelection(
-            this._selectedIndex, direction, this._targets.length);
+        const indices = this._enteredApplication === null
+            ? getTopLevelIndices(this._targets)
+            : getGroupIndices(this._targets, this._enteredApplication);
+        this._selectedIndex = moveInScope(this._selectedIndex, direction, indices);
+        this._view.setSelection(this._selectedIndex);
+    }
+
+    _enterGroup() {
+        const target = this._targets[this._selectedIndex];
+        if (target.kind !== 'app-group')
+            return;
+
+        const indices = getGroupIndices(this._targets, target.application);
+        if (indices.length === 0)
+            return;
+        this._enteredApplication = target.application;
+        this._selectedIndex = indices[0];
+        this._view.setSelection(this._selectedIndex);
+    }
+
+    _leaveGroup() {
+        if (this._enteredApplication === null)
+            return;
+
+        const groupIndex = this._targets.findIndex(target =>
+            target.kind === 'app-group' &&
+            target.application === this._enteredApplication);
+        this._enteredApplication = null;
+        if (groupIndex === -1)
+            return;
+        this._selectedIndex = groupIndex;
         this._view.setSelection(this._selectedIndex);
     }
 
@@ -125,14 +158,55 @@ class SwitcherSession extends St.Widget {
             this._windowSignals.delete(window);
         }
 
+        const previousTargets = this._targets;
+        const previousSelected = previousTargets[this._selectedIndex];
+        const previousApplication = this._enteredApplication;
         const result = removeWindowFromTraversal(
-            this._targets, this._selectedIndex, window, this._lastDirection);
+            previousTargets, this._selectedIndex, window, this._lastDirection);
         this._targets = result.targets;
         this._selectedIndex = result.selectedIndex;
 
         if (this._targets.length === 0) {
             this._finish(false);
             return;
+        }
+
+        if (previousApplication !== null) {
+            const previousGroupIndices = getGroupIndices(previousTargets, previousApplication);
+            const groupIndices = getGroupIndices(this._targets, previousApplication);
+            if (groupIndices.length === 0) {
+                this._enteredApplication = null;
+                const previousGroupIndex = previousTargets.findIndex(target =>
+                    target.kind === 'app-group' &&
+                    target.application === previousApplication);
+                const topLevelIndices = getTopLevelIndices(this._targets);
+                const previousTopLevel = getTopLevelIndices(previousTargets);
+                this._selectedIndex = getScopedRemovalSelection(
+                    previousTargets,
+                    this._targets,
+                    previousGroupIndex,
+                    this._lastDirection,
+                    previousTopLevel,
+                    topLevelIndices);
+            } else {
+                this._selectedIndex = getScopedRemovalSelection(
+                    previousTargets,
+                    this._targets,
+                    previousTargets.indexOf(previousSelected),
+                    this._lastDirection,
+                    previousGroupIndices,
+                    groupIndices);
+            }
+        } else {
+            const previousTopLevel = getTopLevelIndices(previousTargets);
+            const topLevelIndices = getTopLevelIndices(this._targets);
+            this._selectedIndex = getScopedRemovalSelection(
+                previousTargets,
+                this._targets,
+                previousTargets.indexOf(previousSelected),
+                this._lastDirection,
+                previousTopLevel,
+                topLevelIndices);
         }
 
         this._view.setTargets(this._targets);
@@ -196,6 +270,14 @@ class SwitcherSession extends St.Widget {
             this._finish(true, false, event.get_time());
             return Clutter.EVENT_STOP;
         }
+        if (symbol === Clutter.KEY_Down) {
+            this._enterGroup();
+            return Clutter.EVENT_STOP;
+        }
+        if (symbol === Clutter.KEY_Up) {
+            this._leaveGroup();
+            return Clutter.EVENT_STOP;
+        }
 
         const action = global.display.get_keybinding_action(
             event.get_key_code(), event.get_state());
@@ -225,6 +307,7 @@ class SwitcherSession extends St.Widget {
             this._view = null;
         }
         this._targets = Object.freeze([]);
+        this._enteredApplication = null;
         this._onFinished = null;
         super.destroy();
     }
