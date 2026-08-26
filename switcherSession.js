@@ -37,6 +37,7 @@ class SwitcherSession extends St.Widget {
         this._targets = targets;
         this._selectedIndex = getInitialSelection(targets, startingWindow, direction);
         this._enteredApplication = null;
+        this._startingWindow = startingWindow;
         this._lastDirection = direction;
         this._modifierMask = primaryModifier(modifierMask);
         this._timestamp = timestamp;
@@ -54,8 +55,13 @@ class SwitcherSession extends St.Widget {
 
         this._view = new SwitcherView(
             this._targets,
-            index => this._activateIndex(index));
+            this._startingWindow,
+            (index, timestamp) => this._activateIndex(index, timestamp),
+            application => this._enterGroup(application),
+            () => this._leaveGroup());
+        this._startingWindow = null;
         this.add_child(this._view);
+        this._view.build();
         this._view.setSelection(this._selectedIndex);
         this._connectWindowSignals();
         this._systemModalSignal = Main.layoutManager.connect(
@@ -124,9 +130,13 @@ class SwitcherSession extends St.Widget {
         this._view.setSelection(this._selectedIndex);
     }
 
-    _enterGroup() {
-        const target = this._targets[this._selectedIndex];
-        if (target.kind !== 'app-group')
+    _enterGroup(application = null) {
+        const target = application === null
+            ? this._targets[this._selectedIndex]
+            : this._targets.find(candidate =>
+                candidate.kind === 'app-group' &&
+                candidate.application === application);
+        if (target === undefined || target.kind !== 'app-group')
             return;
 
         const indices = getGroupIndices(this._targets, target.application);
@@ -134,6 +144,7 @@ class SwitcherSession extends St.Widget {
             return;
         this._enteredApplication = target.application;
         this._selectedIndex = indices[0];
+        this._view.enterGroup(target.application);
         this._view.setSelection(this._selectedIndex);
     }
 
@@ -148,6 +159,7 @@ class SwitcherSession extends St.Widget {
         if (groupIndex === -1)
             return;
         this._selectedIndex = groupIndex;
+        this._view.leaveGroup();
         this._view.setSelection(this._selectedIndex);
     }
 
@@ -167,7 +179,7 @@ class SwitcherSession extends St.Widget {
         this._selectedIndex = result.selectedIndex;
 
         if (this._targets.length === 0) {
-            this._finish(false);
+            this._finish(false, true);
             return;
         }
 
@@ -210,6 +222,10 @@ class SwitcherSession extends St.Widget {
         }
 
         this._view.setTargets(this._targets);
+        if (this._enteredApplication === null)
+            this._view.leaveGroup();
+        else
+            this._view.enterGroup(this._enteredApplication);
         this._view.setSelection(this._selectedIndex);
     }
 
@@ -227,6 +243,7 @@ class SwitcherSession extends St.Widget {
             return;
 
         this._selectedIndex = index;
+        this._view.setSelection(index);
         this._finish(true, false, timestamp);
     }
 
@@ -243,8 +260,10 @@ class SwitcherSession extends St.Widget {
 
         const view = this._view;
         this._view = null;
-        if (view !== null)
+        if (view !== null) {
+            view.setExitTarget(activate ? this._selectedIndex : null);
             this.remove_child(view);
+        }
 
         const onFinished = this._onFinished;
         this._onFinished = null;
@@ -278,6 +297,14 @@ class SwitcherSession extends St.Widget {
             this._leaveGroup();
             return Clutter.EVENT_STOP;
         }
+        if (symbol === Clutter.KEY_Right) {
+            this.advance(1);
+            return Clutter.EVENT_STOP;
+        }
+        if (symbol === Clutter.KEY_Left) {
+            this.advance(-1);
+            return Clutter.EVENT_STOP;
+        }
 
         const action = global.display.get_keybinding_action(
             event.get_key_code(), event.get_state());
@@ -308,6 +335,7 @@ class SwitcherSession extends St.Widget {
         }
         this._targets = Object.freeze([]);
         this._enteredApplication = null;
+        this._startingWindow = null;
         this._onFinished = null;
         super.destroy();
     }

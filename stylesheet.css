@@ -1,21 +1,26 @@
-.window-switching-redux {
-  background-color: transparent;
+.switcher-backdrop {
+  background-color: rgba(0, 0, 0, 0.35);
 }
 
 .switcher-target {
+  background-color: transparent;
   border: 2px solid transparent;
   border-radius: 12px;
 }
 
-.switcher-target:selected,
-.switcher-app-icon:selected {
+.switcher-selected {
+  background-color: transparent;
   border-color: -st-accent-color;
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.65);
+  box-shadow: none;
+}
+
+.switcher-direct-target:hover {
+  border-color: -st-accent-color;
 }
 
 .switcher-preview-unavailable {
   background-color: rgba(40, 40, 40, 0.85);
-  border-radius: 10px;
+  border-radius: 12px;
 }
 
 .switcher-target-unavailable {
@@ -32,8 +37,27 @@
 }
 
 .switcher-app-icon {
-  background-color: rgba(0, 0, 0, 0.7);
+  background-color: transparent;
   border: 2px solid transparent;
-  border-radius: 14px;
-  padding: 8px;
+  border-radius: 12px;
+}
+
+.switcher-group-outline {
+  background-color: transparent;
+  border: 2px solid transparent;
+  border-radius: 12px;
+}
+
+.switcher-group-outline.switcher-selected,
+.switcher-group-outline.switcher-hovered {
+  border-color: -st-accent-color;
+}
+
+.switcher-window-app-icon {
+  background-color: transparent;
+}
+
+.switcher-group-chevron {
+  color: white;
+  background-color: transparent;
 }

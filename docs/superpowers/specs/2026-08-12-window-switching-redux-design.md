@@ -20,7 +20,6 @@ The screenshots define the intended spatial character: live window previews form
 ## Candidate Windows
 
 At the start of each switching session, obtain windows in strict most-recently-used order. Resolve attached dialogs to their parent for candidate identity, remove `skip-taskbar` windows, and remove duplicate parent windows. Retain attached dialogs as auxiliary preview surfaces so the visual representation can include the parent and its active transients. Minimized windows remain candidates in normal MRU position and are unminimized when activated. Unassociated windows remain candidates even when `Shell.WindowTracker` cannot associate them with an application.
-
 Workspace scope follows `org.gnome.shell.app-switcher::current-workspace-only`, because the extension replaces the application-switcher binding. Passing the active workspace uses Mutter's stock workspace-scoped tab list, which can also include off-workspace windows demanding attention; passing `null` includes all workspaces. No monitor filter is applied. Sticky windows appear once. Transient dialogs travel with their parent.
 
 The candidate list, MRU rank, application mapping, and group eligibility are frozen for the session. A window that closes is removed, but newly opened windows are not added and surviving targets are not reordered.
@@ -99,14 +98,21 @@ App groups occupy the lower portion as loose clusters. Windows within a group re
 The complete composition uses one deterministic scale that fits the direct gallery and all app clusters inside the usable work area. Direct targets retain priority, but every grouped target remains visible. At high counts, continue shrinking the complete composition rather than scrolling, clipping, or dropping targets.
 
 Only the selected target shows a pill-shaped label. A direct or grouped window target shows its title; an app group target shows the application name. Selection uses a restrained accent outline. Unselected targets are neither dimmed nor rearranged.
+Window preview pixels use the same 12-pixel corner radius as their selection outline, including throughout geometry transitions.
 
 ### Transform Animation
 
-Every available live clone begins at its source actor's exact stage-space geometry and animates to its assigned preview geometry over approximately 220 milliseconds using an ease-out curve. Clone geometry remains aspect-preserving throughout the transform. Attached-dialog clones keep their source-relative position and scale within the parent composition.
+The starting window's direct representation begins at its source actor's exact stage-space geometry and animates to its assigned preview geometry over approximately 220 milliseconds using an ease-out curve.
+Every other preview fades in at its destination, so overlapping desktop windows do not burst apart during entrance.
+Clone geometry remains aspect-preserving throughout the transform. Attached-dialog clones keep their source-relative position and scale within the parent composition.
 
 Application icons, the selected outline, and the selected label fade in during the final third of the entrance. Keyboard selection is active immediately; traversal changes only selection styling and never rearranges the frozen composition.
 
-Commit and cancel release input immediately, then animate every surviving clone from its current transform toward its current source geometry over approximately 180 milliseconds. If exit interrupts entrance, it starts from the clone's interpolated geometry rather than jumping to either endpoint. Activation never waits for either animation. Animations-disabled mode applies destination geometry immediately and completes cleanup synchronously.
+Commit and cancel release input immediately.
+Commit animates only the activated target's preview from its current transform toward its current source geometry over approximately 180 milliseconds while every other preview and chrome actor fades out.
+Cancel stops child geometry transitions and fades the current composition out over the same duration, avoiding activation-like expansion toward overlapping desktop windows.
+If exit interrupts entrance, it starts from the current interpolated presentation without jumping. Activation never waits for either animation.
+Animations-disabled mode applies the exit state immediately and completes cleanup synchronously.
 
 Source window actors remain visible and unmodified. A source actor disappearing invalidates only its clone. Session disable, system-modal interruption, and target-set exhaustion cancel all transitions and synchronously destroy the animation layer.
 
