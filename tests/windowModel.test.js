@@ -155,6 +155,18 @@ test('a recent single-window application receives no app group', () => {
     assert.equal(targets.some(target => target.kind === 'app-group' && target.application === apps.Browser), false);
 });
 
+test('an older single-window application remains reachable through its app group', () => {
+    const targets = buildTraversal([
+        record('F1', 'Files'), record('T1', 'Text Editor'), record('F2', 'Files'),
+        record('B1', 'Files'), record('U1', 'Browser'),
+    ], 4);
+
+    assert.deepEqual(labels(targets).slice(-2), [
+        'Browser group',
+        'U1 grouped',
+    ]);
+});
+
 test('recent windows reappear in eligible application groups', () => {
     const targets = buildTraversal([record('F1', 'Files'), record('T1', 'Text Editor'), record('F2', 'Files'), record('B1', 'Browser'), record('F3', 'Files')], 4);
 

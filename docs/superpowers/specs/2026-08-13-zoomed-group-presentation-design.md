@@ -19,7 +19,7 @@ The full composition retains the four direct recent-window targets and compact a
 
 Entering a group fades every direct target and every other app group out completely. The entered group's grouped window targets animate from their frozen cluster positions into the same balanced gallery arrangement used for direct recent windows. No unrelated targets remain visible around the edges.
 
-The entered group's large application icon remains centered beneath the gallery. A persistent up-chevron appears beneath it.
+The entered group's large application icon remains centered beneath the gallery. A persistent up-chevron appears above it.
 
 - `Tab` and `Shift+Tab` continue wrapping among the entered group's windows.
 - `Up Arrow` returns to the full composition and reselects the app group target.
@@ -29,7 +29,9 @@ The entered group's large application icon remains centered beneath the gallery.
 
 ## Transitions
 
-Descent and return animate for approximately 180 milliseconds with an ease-out curve. Grouped previews animate between their cluster geometry and balanced gallery geometry. Full-composition targets fade out on descent and back in on return. The app icon moves between its cluster and centered group-gallery positions; the down-chevron is replaced by the up-chevron.
+Descent and return animate for approximately 180 milliseconds with an ease-out curve. Grouped previews animate between their cluster geometry and balanced gallery geometry.
+Full-composition targets fade out on descent and back in on return. A direct preview that duplicates a moving grouped preview fades out during the first third of descent and fades in during the final third of return, preventing both representations from competing throughout the motion.
+The app icon remains centered beneath the complete cluster and moves to the centered group-gallery position; the down-chevron is replaced by the up-chevron.
 
 Keyboard and pointer input remain active during transitions. Selection changes and activation never wait for animation completion. Reversing direction while a transition is active starts from current interpolated geometry without jumping.
 
@@ -38,6 +40,7 @@ Animations-disabled mode applies the destination composition synchronously.
 ## Titles And Selection
 
 Only the selected target shows a title pill. Window-title pills are horizontally centered beneath their preview in both the full direct-window gallery and the entered group gallery. Pills use their natural text width up to the preview width, with long titles ellipsized. They do not stretch across the complete preview width.
+On group entry, the selected window title stays effectively transparent while its preview moves and fades in during the final third of the transition. On return, the selected app-group title follows the same staging instead of moving visibly with the cluster.
 
 Selection remains an accent outline only. It does not dim, tint, shadow, resize, or rearrange the selected preview.
 

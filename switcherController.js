@@ -75,9 +75,12 @@ export class SwitcherController {
             this._exitView = null;
         }
 
+        const startingWindow = window !== null && window.is_attached_dialog()
+            ? window.get_transient_for()
+            : window;
         const session = new SwitcherSession({
             targets,
-            startingWindow: window,
+            startingWindow,
             direction,
             modifierMask: binding.get_mask(),
             timestamp: event.get_time(),
