@@ -181,6 +181,43 @@ test('unassociated windows stay direct and never form a group', () => {
     assert.equal(targets.some(target => target.kind === 'app-group' && target.application === null), false);
 });
 
+test('more than four unassociated windows remain direct targets in MRU order', () => {
+    const records = Object.keys(windows).map(name => record(name));
+    const targets = buildTraversal(records, 4);
+
+    assert.deepEqual(labels(targets), records.map(({window}) => `${window.name} direct`));
+    assert.ok(targets.every(target => target.application === null));
+    assert.deepEqual(getTopLevelIndices(targets), records.map((_, index) => index));
+    assert.equal(targets[getInitialSelection(targets, windows.F1, -1)].window, windows.U1);
+});
+
+test('older unassociated windows follow recent direct targets before application groups', () => {
+    const targets = buildTraversal([
+        record('F1', 'Files'), record('T1', 'Text Editor'), record('F2', 'Files'),
+        record('B1', 'Browser'), record('T2'), record('F3', 'Files'), record('U1'),
+    ], 4);
+
+    assert.deepEqual(labels(targets), [
+        'F1 direct', 'T1 direct', 'F2 direct', 'B1 direct', 'T2 direct', 'U1 direct',
+        'Files group', 'F1 grouped', 'F2 grouped', 'F3 grouped',
+    ]);
+    assert.equal(targets[4].application, null);
+    assert.equal(targets[5].application, null);
+
+    for (const [direction, expectedLabel] of [[1, 'Files group'], [-1, 'T2 direct']]) {
+        const result = removeWindowFromTraversal(targets, 5, windows.U1, direction);
+        const selectedIndex = getScopedRemovalSelection(
+            targets, result.targets, 5, direction,
+            getTopLevelIndices(targets), getTopLevelIndices(result.targets));
+        assert.equal(labels(result.targets)[selectedIndex], expectedLabel);
+        assert.equal(result.targets.some(target => target.window === windows.U1), false);
+        assert.equal(result.targets.find(target => target.window === windows.T2).application, null);
+    }
+
+    const result = removeWindowFromTraversal(targets, 5, windows.F1, 1);
+    assert.equal(result.targets[result.selectedIndex].window, windows.U1);
+});
+
 test('group order uses each application newest global window', () => {
     const targets = buildTraversal([
         record('F1', 'Files'), record('T1', 'Text Editor'), record('B1', 'Browser'), record('F2', 'Files'), record('T2', 'Text Editor'), record('F3', 'Files'),

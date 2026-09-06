@@ -2,5 +2,6 @@
   "uuid": "window-switching-redux@razzeee.github.io",
   "name": "Window Switching Redux",
   "description": "Mixes four recent windows with complete application groups in one switcher.",
-  "shell-version": ["50"]
+  "shell-version": ["50"],
+  "url": "https://github.com/razzeee/window-switching-redux"
 }

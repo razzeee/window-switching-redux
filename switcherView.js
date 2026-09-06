@@ -6,31 +6,23 @@ import Atk from 'gi://Atk';
 import Clutter from 'gi://Clutter';
 import Cogl from 'gi://Cogl';
 import GObject from 'gi://GObject';
+import Meta from 'gi://Meta';
 import Pango from 'gi://Pango';
 import Shell from 'gi://Shell';
 import St from 'gi://St';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
-import {calculateGroupHorizontalLayout} from './switcherLayout.js';
+import {
+    calculateEnteredLayout,
+    calculateFullLayout,
+    CHEVRON_SIZE,
+    DIRECT_ICON_SIZE,
+    ICON_SIZE,
+} from './switcherLayout.js';
 
-const GAP = 24;
-const MARGIN = 48;
-const LABEL_HEIGHT = 32;
-const ICON_SIZE = 120;
 const APP_ICON_CONTENT_SIZE = 110;
-const DIRECT_ICON_SIZE = 48;
-const CHEVRON_SIZE = 24;
-const DIRECT_CHROME_CLEARANCE = 72;
-const WINDOW_TITLE_CLEARANCE = LABEL_HEIGHT + 16;
-const REGION_GAP = 64;
-const GROUP_PREVIEW_SCALE = 0.58;
-const GROUP_VERTICAL_OFFSET = 0.12;
-const MIN_GROUP_ICON_SIZE = 88;
 const PREVIEW_CORNER_RADIUS = 12;
-const FULL_GROUP_CHROME_HEIGHT = 16 + MIN_GROUP_ICON_SIZE + CHEVRON_SIZE + 16 + LABEL_HEIGHT;
-const ENTERED_GROUP_CHROME_HEIGHT = CHEVRON_SIZE + 16 + ICON_SIZE + 16 + LABEL_HEIGHT;
-const MAX_PREVIEW_SCALE = 0.7;
 const ENTRANCE_TIME = 220;
 const TRANSITION_TIME = 180;
 const EXIT_TIME = 180;
@@ -162,13 +154,12 @@ function visitActorTree(actor, callback) {
 }
 
 function recordBounds(record) {
-    const actors = [record.window, ...record.auxiliarySurfaces]
-        .map(surface => surface.get_compositor_private())
-        .filter(actor => actor !== null);
-    if (actors.length === 0)
+    const geometries = [record.window, ...record.auxiliarySurfaces]
+        .filter(surface => surface.get_compositor_private() !== null)
+        .map(surface => surface.get_buffer_rect());
+    if (geometries.length === 0)
         return {x: 0, y: 0, width: 960, height: 600};
 
-    const geometries = actors.map(sourceGeometry);
     const left = Math.min(...geometries.map(geometry => geometry.x));
     const top = Math.min(...geometries.map(geometry => geometry.y));
     const right = Math.max(...geometries.map(geometry => geometry.x + geometry.width));
@@ -181,257 +172,9 @@ function recordBounds(record) {
     };
 }
 
-function workArea() {
-    const areas = Main.layoutManager.monitors.map((_, index) =>
-        Main.layoutManager.getWorkAreaForMonitor(index));
-    const left = Math.min(...areas.map(area => area.x));
-    const top = Math.min(...areas.map(area => area.y));
-    const right = Math.max(...areas.map(area => area.x + area.width));
-    const bottom = Math.max(...areas.map(area => area.y + area.height));
-
-    return {
-        x: left + MARGIN,
-        y: top + MARGIN,
-        width: Math.max(1, right - left - MARGIN * 2),
-        height: Math.max(1, bottom - top - MARGIN * 2),
-    };
-}
-
-function balancedRows(items) {
-    if (items.length === 0)
-        return [];
-    if (items.length <= 2)
-        return [items];
-    const split = Math.ceil(items.length / 2);
-    return [items.slice(0, split), items.slice(split)];
-}
-
-function rowSize(row, sizes) {
-    return {
-        width: row.reduce((sum, {index}) => sum + sizes.get(index).width, 0) +
-            Math.max(0, row.length - 1) * GAP,
-        height: Math.max(0, ...row.map(({index}) => sizes.get(index).height)),
-    };
-}
-
-function placeGalleryRows(rows, rowSizes, sizes, area, y, scale, rowClearance) {
-    const geometries = new Map();
-    const scaledGap = GAP * scale;
-
-    rows.forEach((row, rowIndex) => {
-        const rowWidth = rowSizes[rowIndex].width * scale;
-        const rowHeight = rowSizes[rowIndex].height * scale;
-        let x = area.x + (area.width - rowWidth) / 2;
-        for (const {index} of row) {
-            const size = sizes.get(index);
-            const width = size.width * scale;
-            const height = size.height * scale;
-            geometries.set(index, {x, y: y + (rowHeight - height) / 2, width, height});
-            x += width + scaledGap;
-        }
-        y += rowHeight + rowClearance;
-        if (rowIndex < rows.length - 1)
-            y += scaledGap;
-    });
-
-    return {geometries, bottom: y};
-}
-
-function scaledSize(size, scale) {
-    return {
-        ...size,
-        width: size.width * scale,
-        height: size.height * scale,
-    };
-}
-
-function groupSize(group, sizes) {
-    const horizontalLayout = calculateGroupHorizontalLayout(
-        group.children.map(({index}) => sizes.get(index).width), 0);
-    let height = 0;
-    group.children.forEach(({index}, childIndex) => {
-        const size = sizes.get(index);
-        height = Math.max(height, size.height + childIndex * size.height * GROUP_VERTICAL_OFFSET);
-    });
-
-    return {width: horizontalLayout.previewWidth, height};
-}
-
-function calculateFullLayout(targets) {
-    const area = workArea();
-    const sizes = new Map();
-    const directTargets = [];
-    const groups = [];
-
-    targets.forEach((target, index) => {
-        if (target.kind === 'direct-window') {
-            sizes.set(index, recordBounds(target));
-            directTargets.push({target, index});
-        } else if (target.kind === 'app-group') {
-            groups.push({target, index, children: []});
-        }
-    });
-    targets.forEach((target, index) => {
-        if (target.kind !== 'grouped-window')
-            return;
-        sizes.set(index, scaledSize(recordBounds(target), GROUP_PREVIEW_SCALE));
-        groups.find(group => group.target.application === target.application)
-            .children.push({target, index});
-    });
-
-    const rows = balancedRows(directTargets);
-    const rowSizes = rows.map(row => rowSize(row, sizes));
-    const groupSizes = groups.map(group => groupSize(group, sizes));
-    const hasGroups = groups.length > 0;
-    const regionGap = directTargets.length > 0 && hasGroups ? REGION_GAP : 0;
-    const directNaturalWidth = Math.max(0, ...rowSizes.map(size => size.width));
-    const directNaturalHeight = rowSizes.reduce((sum, size) => sum + size.height, 0) +
-        Math.max(0, rows.length - 1) * GAP;
-    const groupsNaturalHeight = Math.max(0, ...groupSizes.map(size => size.height));
-    const naturalHeight = directNaturalHeight + groupsNaturalHeight;
-    const directChromeClearance = rows.length * DIRECT_CHROME_CLEARANCE;
-    const groupChromeClearance = hasGroups ? FULL_GROUP_CHROME_HEIGHT : 0;
-    let scale = Math.min(
-        MAX_PREVIEW_SCALE,
-        area.width / Math.max(1, directNaturalWidth),
-        (area.height - directChromeClearance - groupChromeClearance - regionGap) /
-            Math.max(1, naturalHeight));
-    const groupIconFloor = groups.length === 0
-        ? MIN_GROUP_ICON_SIZE
-        : Math.min(
-            MIN_GROUP_ICON_SIZE,
-            Math.max(1, (area.width - Math.max(0, groups.length - 1) * GAP * MAX_PREVIEW_SCALE) /
-                groups.length));
-    const groupHorizontalLayout = (group, candidateScale) =>
-        calculateGroupHorizontalLayout(
-            group.children.map(({index}) => sizes.get(index).width * candidateScale),
-            groupIconFloor);
-    const scaledGroupsWidth = candidateScale =>
-        groups.reduce((sum, group) =>
-            sum + groupHorizontalLayout(group, candidateScale).width, 0) +
-        Math.max(0, groups.length - 1) * GAP * candidateScale;
-    if (scaledGroupsWidth(scale) > area.width) {
-        let lower = 0;
-        let upper = scale;
-        for (let iteration = 0; iteration < 20; iteration++) {
-            const candidate = (lower + upper) / 2;
-            if (scaledGroupsWidth(candidate) <= area.width)
-                lower = candidate;
-            else
-                upper = candidate;
-        }
-        scale = lower;
-    }
-    const directHeight = directNaturalHeight * scale;
-    const groupsHeight = groupsNaturalHeight * scale;
-    const contentHeight = directHeight + groupsHeight + directChromeClearance +
-        groupChromeClearance + regionGap;
-    let y = area.y + (area.height - contentHeight) / 2;
-    const directLayout = placeGalleryRows(
-        rows, rowSizes, sizes, area, y, scale, DIRECT_CHROME_CLEARANCE);
-    const geometries = directLayout.geometries;
-
-    y = directLayout.bottom;
-    if (directTargets.length > 0 && hasGroups)
-        y += REGION_GAP;
-    const scaledGap = GAP * scale;
-    const groupHorizontalLayouts = groups.map(group =>
-        groupHorizontalLayout(group, scale));
-    const groupWidths = groupHorizontalLayouts.map(layout => layout.width);
-    const groupsWidth = groupWidths.reduce((sum, width) => sum + width, 0) +
-        Math.max(0, groups.length - 1) * scaledGap;
-    let groupX = area.x + (area.width - groupsWidth) / 2;
-    groups.forEach((group, groupIndex) => {
-        const size = groupSizes[groupIndex];
-        const horizontalLayout = groupHorizontalLayouts[groupIndex];
-        const {previewWidth, previewX, width} = horizontalLayout;
-        const previewHeight = size.height * scale;
-        const iconSize = groupIconFloor;
-        group.children.forEach(({index}, childIndex) => {
-            const childSize = sizes.get(index);
-            const childWidth = childSize.width * scale;
-            const childHeight = childSize.height * scale;
-            geometries.set(index, {
-                x: groupX + previewX + horizontalLayout.offsets[childIndex],
-                y: y + childIndex * childHeight * GROUP_VERTICAL_OFFSET,
-                width: childWidth,
-                height: childHeight,
-            });
-        });
-        geometries.set(group.index, {
-            x: groupX,
-            y,
-            width,
-            height: previewHeight + groupChromeClearance,
-            previewHeight,
-            previewWidth,
-            previewX,
-            iconSize,
-            iconX: horizontalLayout.iconX,
-            iconY: previewHeight + 8,
-        });
-        groupX += width + scaledGap;
-    });
-
-    return {geometries, groups};
-}
-
-function calculateEnteredLayout(targets, application) {
-    const area = workArea();
-    const items = [];
-    const sizes = new Map();
-    let groupIndex = -1;
-
-    targets.forEach((target, index) => {
-        if (target.kind === 'app-group' && target.application === application)
-            groupIndex = index;
-        if (target.kind === 'grouped-window' && target.application === application) {
-            items.push({target, index});
-            sizes.set(index, recordBounds(target));
-        }
-    });
-    if (groupIndex === -1 || items.length === 0)
-        return null;
-
-    const rows = balancedRows(items);
-    const rowSizes = rows.map(row => rowSize(row, sizes));
-    const naturalWidth = Math.max(1, ...rowSizes.map(size => size.width));
-    const naturalHeight = rowSizes.reduce((sum, size) => sum + size.height, 0) +
-        Math.max(0, rows.length - 1) * GAP;
-    const rowChromeHeight = rows.length * WINDOW_TITLE_CLEARANCE;
-    const chromeHeight = rowChromeHeight + ENTERED_GROUP_CHROME_HEIGHT;
-    const scale = Math.min(
-        MAX_PREVIEW_SCALE,
-        area.width / naturalWidth,
-        (area.height - chromeHeight) / Math.max(1, naturalHeight));
-    const galleryHeight = naturalHeight * scale;
-    const contentHeight = galleryHeight + chromeHeight;
-    const y = area.y + (area.height - contentHeight) / 2;
-    const layout = placeGalleryRows(
-        rows, rowSizes, sizes, area, y, scale, WINDOW_TITLE_CLEARANCE);
-    const groupWidth = Math.max(ICON_SIZE, Math.min(area.width, naturalWidth * scale));
-
-    layout.geometries.set(groupIndex, {
-        x: area.x + (area.width - groupWidth) / 2,
-        y: layout.bottom,
-        width: groupWidth,
-        height: ENTERED_GROUP_CHROME_HEIGHT,
-        previewHeight: 0,
-        previewWidth: 0,
-        previewX: 0,
-        iconSize: ICON_SIZE,
-        iconX: (groupWidth - ICON_SIZE) / 2,
-        iconY: CHEVRON_SIZE + 16,
-    });
-    return {geometries: layout.geometries, groupIndex};
-}
-
 function destinationForSurface(record, surface, geometry) {
     const bounds = recordBounds(record);
-    const source = surface.get_compositor_private();
-    if (source === null)
-        return geometry;
-    const sourceRect = sourceGeometry(source);
+    const sourceRect = surface.get_buffer_rect();
     const scale = Math.min(geometry.width / bounds.width, geometry.height / bounds.height);
     return {
         x: geometry.x + (sourceRect.x - bounds.x) * scale,
@@ -443,7 +186,7 @@ function destinationForSurface(record, surface, geometry) {
 
 export const SwitcherView = GObject.registerClass(
 class SwitcherView extends St.Widget {
-    _init(targets, startingWindow, activateTarget, enterGroupRequested, leaveGroupRequested) {
+    _init(targets, startingWindow, activateTarget, enterGroupRequested, leaveGroupRequested, pointerMoved, targetFocused) {
         super._init({
             style_class: 'window-switching-redux',
             accessible_role: Atk.Role.MENU,
@@ -453,9 +196,18 @@ class SwitcherView extends St.Widget {
         this._activateTarget = activateTarget;
         this._enterGroupRequested = enterGroupRequested;
         this._leaveGroupRequested = leaveGroupRequested;
+        this._pointerMoved = pointerMoved;
+        this._targetFocused = targetFocused;
         this._enteredApplication = null;
         this._targetActors = [];
         this._cloneEntries = [];
+        this._sourceGeometrySignals = new Map();
+        this._geometryLaterId = 0;
+        this._themeContext = St.ThemeContext.get_for_stage(global.stage);
+        this._themeScale = this._themeContext.scale_factor;
+        this._themeSignalId = 0;
+        this._keyFocusSignalId = 0;
+        this._clickActions = [];
         this._chromeActors = [];
         this._selectedIndex = -1;
         this._exitTargetIndex = null;
@@ -467,104 +219,119 @@ class SwitcherView extends St.Widget {
         }
         this._backdropActor = null;
         this._fullLayout = null;
+        let monitorIndex = startingWindow === null ? -1 : startingWindow.get_monitor();
+        if (monitorIndex < 0)
+            monitorIndex = global.display.get_current_monitor();
+        this._workArea = Main.layoutManager.getWorkAreaForMonitor(monitorIndex);
         this.set_size(global.stage.width, global.stage.height);
     }
 
     build() {
         this._build();
+        this._themeSignalId = this._themeContext.connect('changed', () => this._queueGeometryRefresh());
+        this._keyFocusSignalId = global.stage.connect('notify::key-focus', () => {
+            const focused = global.stage.get_key_focus();
+            if (focused === null)
+                return;
+            const index = this._targetActors.findIndex(actor =>
+                actor.contains(focused) || actor._groupOutline?.contains(focused) ||
+                actor._previewActors?.some(preview => preview.contains(focused)));
+            if (index < 0)
+                return;
+            if (this._targetActors[index].reactive && index !== this._selectedIndex)
+                this._targetFocused(index);
+            // ATK can focus descendants and targets outside the navigation scope.
+            const selected = this._targetActors[this._selectedIndex];
+            if (selected?.can_focus && selected !== global.stage.get_key_focus())
+                selected.grab_key_focus();
+        });
+    }
+
+    _disconnectKeyFocus() {
+        if (this._keyFocusSignalId !== 0) {
+            global.stage.disconnect(this._keyFocusSignalId);
+            this._keyFocusSignalId = 0;
+        }
+    }
+
+    _disconnectTheme() {
+        if (this._themeSignalId !== 0) {
+            this._themeContext.disconnect(this._themeSignalId);
+            this._themeSignalId = 0;
+        }
+        this._themeContext = null;
     }
 
     _createIcon(application, size) {
+        // St.Icon applies the theme scale to this logical size itself.
         if (application !== null)
             return application.create_icon_texture(size);
         return new St.Icon({icon_name: 'application-x-executable', icon_size: size});
     }
 
     _connectActivation(actor, index) {
-        actor.connect('button-release-event', (_actor, event) => {
-            if (event.get_button() === Clutter.BUTTON_PRIMARY)
-                this._activateTarget(index, event.get_time());
-            return Clutter.EVENT_STOP;
+        actor.connect('motion-event', (_actor, event) => {
+            this._pointerMoved(index, event);
+            // Consuming motion cancels Clutter's in-progress click gestures.
+            return Clutter.EVENT_PROPAGATE;
         });
-        actor.connect('touch-event', (_actor, event) => {
-            if (event.type() === Clutter.EventType.TOUCH_END)
-                this._activateTarget(index, event.get_time());
-            return Clutter.EVENT_STOP;
+        const gesture = new Clutter.ClickGesture({required_button: Clutter.BUTTON_PRIMARY});
+        const signal = gesture.connect('recognize', click => {
+            const timestamp = click.get_point_event(-1).get_time();
+            this._activateTarget(index, timestamp);
         });
+        actor.add_action(gesture);
+        actor._clickGesture = gesture;
+        const clickAction = {actor, gesture, signal, sequenceSignal: 0};
+        this._clickActions.push(clickAction);
+        return clickAction;
     }
 
-    _connectRequest(actor, callback) {
-        actor.connect('button-release-event', (_actor, event) => {
-            if (event.get_button() === Clutter.BUTTON_PRIMARY)
-                callback();
-            return Clutter.EVENT_STOP;
-        });
-        actor.connect('touch-event', (_actor, event) => {
-            if (event.type() === Clutter.EventType.TOUCH_END)
-                callback();
-            return Clutter.EVENT_STOP;
-        });
-    }
-
-    _positionLabel(label, previewWidth, y, animate = false) {
-        const [, naturalWidth] = label.get_preferred_width(-1);
-        const width = Math.max(1, Math.min(previewWidth, naturalWidth));
+    _positionLabel(label, previewWidth, y, chromeScale, animate = false) {
+        // GNOME 50 St.Label applies its font in style-changed, even when hidden.
+        label.ensure_style();
+        // Bypass explicit dimensions from the previous layout or rebuild.
+        const [, naturalWidth] = label.vfunc_get_preferred_width(-1);
+        const width = Math.min(previewWidth / chromeScale, naturalWidth);
+        const [, height] = label.vfunc_get_preferred_height(-1);
         this._setActorProperties(label, {
-            x: (previewWidth - width) / 2,
+            x: (previewWidth - width * chromeScale) / 2,
             y,
             width,
+            height,
+            scale_x: chromeScale,
+            scale_y: chromeScale,
         }, animate);
     }
 
-    _createWindowTarget(target, index, geometry) {
+    _createWindowTarget(target, index) {
         const actor = new St.Widget({
-            style_class: target.kind === 'direct-window'
-                ? 'switcher-target switcher-direct-target'
-                : 'switcher-target',
+            style_class: 'switcher-target',
             reactive: true,
-            track_hover: true,
             accessible_role: Atk.Role.MENU_ITEM,
             accessible_name: targetName(target),
         });
-        actor.set_position(geometry.x, geometry.y);
-        actor.set_size(geometry.width, geometry.height);
         actor._previewActors = [];
         this._connectActivation(actor, index);
         this.add_child(actor);
-        if (target.kind === 'grouped-window') {
-            actor.track_hover = true;
-            const groupActor = this._targetActors.find(candidate =>
-                candidate?._application === target.application);
-            actor.connect('notify::hover', () => {
-                if (actor.hover)
-                    groupActor._hoveredPreviews.add(actor);
-                else
-                    groupActor._hoveredPreviews.delete(actor);
-                groupActor._syncHover();
-            });
-        }
 
-        let labelY = geometry.height + 8;
         if (target.kind === 'direct-window') {
-            const iconBin = new St.Bin({style_class: 'switcher-window-app-icon'});
+            const iconBin = new St.Bin({style_class: 'switcher-window-app-icon', reactive: true});
             iconBin.set_child(this._createIcon(target.application, DIRECT_ICON_SIZE));
-            iconBin.set_size(DIRECT_ICON_SIZE, DIRECT_ICON_SIZE);
+            iconBin.set_size(DIRECT_ICON_SIZE * this._themeScale, DIRECT_ICON_SIZE * this._themeScale);
             actor.add_child(iconBin);
             actor._directIcon = iconBin;
-            this._positionDirectIcon(actor, geometry, false);
-            const iconSize = Math.max(1, Math.min(DIRECT_ICON_SIZE, geometry.height / 3));
-            labelY += iconSize / 2;
         }
 
         const label = new St.Label({
             text: targetName(target),
             style_class: 'switcher-window-title',
+            reactive: true,
             visible: false,
         });
         label.clutter_text.ellipsize = Pango.EllipsizeMode.END;
         label.clutter_text.single_line_mode = true;
         actor.add_child(label);
-        this._positionLabel(label, geometry.width, labelY);
         actor.label_actor = label;
         actor._selectionLabel = label;
         actor._selectionActor = actor;
@@ -573,41 +340,41 @@ class SwitcherView extends St.Widget {
     }
 
     _positionDirectIcon(actor, geometry, animate) {
-        const iconSize = Math.max(1, Math.min(DIRECT_ICON_SIZE, geometry.height / 3));
+        const backingSize = DIRECT_ICON_SIZE * this._themeScale;
+        const iconSize = Math.min(backingSize * geometry.chromeScale, geometry.height / 3, geometry.width);
         this._setActorProperties(actor._directIcon, {
             x: (geometry.width - iconSize) / 2,
             y: geometry.height - iconSize / 2,
-            scale_x: iconSize / DIRECT_ICON_SIZE,
-            scale_y: iconSize / DIRECT_ICON_SIZE,
+            width: backingSize,
+            height: backingSize,
+            scale_x: iconSize / backingSize,
+            scale_y: iconSize / backingSize,
         }, animate);
     }
 
     _createChevron(iconName, accessibleName, callback) {
-        const button = new St.Bin({
+        const button = new St.Button({
             style_class: 'switcher-group-chevron',
-            reactive: true,
+            can_focus: false,
             track_hover: false,
-            accessible_role: Atk.Role.PUSH_BUTTON,
+            button_mask: St.ButtonMask.ONE,
             accessible_name: accessibleName,
             child: new St.Icon({icon_name: iconName, icon_size: CHEVRON_SIZE}),
         });
-        button.set_size(CHEVRON_SIZE + 16, CHEVRON_SIZE + 8);
-        this._connectRequest(button, callback);
+        button.set_size((CHEVRON_SIZE + 16) * this._themeScale, (CHEVRON_SIZE + 8) * this._themeScale);
+        button.connect('clicked', callback);
         return button;
     }
 
-    _createGroupTarget(group, geometry) {
+    _createGroupTarget(group) {
         const {target, index} = group;
         const actor = new St.Widget({
             style_class: 'switcher-group-target',
             reactive: true,
-            track_hover: true,
             accessible_role: Atk.Role.MENU_ITEM,
             accessible_name: targetName(target),
         });
-        actor.set_position(geometry.x, geometry.y);
-        actor.set_size(geometry.width, geometry.height);
-        this._connectActivation(actor, index);
+        const clickAction = this._connectActivation(actor, index);
         this.add_child(actor);
 
         const outline = new St.Widget({
@@ -616,15 +383,7 @@ class SwitcherView extends St.Widget {
         });
         this.add_child(outline);
         actor._groupOutline = outline;
-        actor._application = target.application;
-        actor._hoveredPreviews = new Set();
-        actor._syncHover = () => {
-            if (actor.hover || actor._hoveredPreviews.size > 0)
-                outline.add_style_class_name('switcher-hovered');
-            else
-                outline.remove_style_class_name('switcher-hovered');
-        };
-        actor.connect('notify::hover', actor._syncHover);
+        actor.add_accessible_state(Atk.StateType.EXPANDABLE);
 
         const iconBin = new St.Bin({
             style_class: 'switcher-app-icon',
@@ -634,7 +393,7 @@ class SwitcherView extends St.Widget {
             y_align: Clutter.ActorAlign.CENTER,
         });
         iconBin.set_child(this._createIcon(target.application, APP_ICON_CONTENT_SIZE));
-        iconBin.set_size(ICON_SIZE, ICON_SIZE);
+        iconBin.set_size(ICON_SIZE * this._themeScale, ICON_SIZE * this._themeScale);
         actor.add_child(iconBin);
         actor._iconBin = iconBin;
 
@@ -651,8 +410,18 @@ class SwitcherView extends St.Widget {
             () => this._leaveGroupRequested());
         upChevron.opacity = 0;
         upChevron.reactive = false;
+        upChevron.hide();
         actor.add_child(upChevron);
         actor._upChevron = upChevron;
+
+        // A cancelled chevron press must not become a click on its parent group.
+        clickAction.sequenceSignal = clickAction.gesture.connect(
+            'should-handle-sequence', (_gesture, event) => {
+                const [x, y] = event.get_coords();
+                const pressedActor = global.stage.get_actor_at_pos(Clutter.PickMode.REACTIVE, x, y);
+                return pressedActor === null || ![downChevron, upChevron].some(button =>
+                    pressedActor === button || button.contains(pressedActor));
+            });
 
         const label = new St.Label({
             text: targetName(target),
@@ -665,7 +434,6 @@ class SwitcherView extends St.Widget {
         actor.label_actor = label;
         actor._selectionLabel = label;
         actor._selectionActor = outline;
-        this._positionGroupChrome(actor, geometry, false, false, false);
         this._chromeActors.push(actor);
         this._chromeActors.push(outline);
         this._targetActors[index] = actor;
@@ -674,11 +442,25 @@ class SwitcherView extends St.Widget {
     _positionGroupChrome(
         actor, geometry, entered, isEntered, animate,
         duration = TRANSITION_TIME, lateFade = false) {
-        const iconScale = geometry.iconSize / ICON_SIZE;
+        const backingSize = ICON_SIZE * this._themeScale;
+        const iconScale = geometry.iconSize / backingSize;
+        const {chromeScale} = geometry;
+        const spacingScale = this._themeScale * chromeScale;
         const iconX = geometry.iconX;
-        const chevronX = iconX + (geometry.iconSize - CHEVRON_SIZE - 16) / 2;
-        const downChevronY = geometry.iconY + geometry.iconSize + 8;
-        const upChevronY = geometry.iconY - CHEVRON_SIZE - 8;
+        const chevronX = iconX + (geometry.iconSize - (CHEVRON_SIZE + 16) * spacingScale) / 2;
+        const downChevronY = geometry.iconY + geometry.iconSize + 8 * spacingScale;
+        const upChevronY = geometry.iconY - (CHEVRON_SIZE + 8) * spacingScale;
+        for (const [button, visible] of [[actor._downChevron, !entered], [actor._upChevron, isEntered]]) {
+            button.reactive = visible;
+            if (visible)
+                button.show();
+            else
+                button.fake_release();
+        }
+        if (isEntered)
+            actor.add_accessible_state(Atk.StateType.EXPANDED);
+        else
+            actor.remove_accessible_state(Atk.StateType.EXPANDED);
         const outlineProperties = {
             x: geometry.x + geometry.previewX,
             y: geometry.y,
@@ -693,6 +475,8 @@ class SwitcherView extends St.Widget {
         this._setActorProperties(actor._iconBin, {
             x: iconX,
             y: geometry.iconY,
+            width: backingSize,
+            height: backingSize,
             scale_x: iconScale,
             scale_y: iconScale,
         }, animate, duration);
@@ -700,18 +484,27 @@ class SwitcherView extends St.Widget {
             actor._downChevron, {
                 x: chevronX,
                 y: downChevronY,
+                width: (CHEVRON_SIZE + 16) * this._themeScale,
+                height: (CHEVRON_SIZE + 8) * this._themeScale,
+                scale_x: chromeScale,
+                scale_y: chromeScale,
                 opacity: entered ? 0 : 255,
-            }, animate, duration);
+            }, animate, duration, entered ? () => actor._downChevron.hide() : null);
         this._setActorProperties(
             actor._upChevron, {
                 x: chevronX,
                 y: upChevronY,
+                width: (CHEVRON_SIZE + 16) * this._themeScale,
+                height: (CHEVRON_SIZE + 8) * this._themeScale,
+                scale_x: chromeScale,
+                scale_y: chromeScale,
                 opacity: isEntered ? 255 : 0,
-            }, animate, duration);
+            }, animate, duration, isEntered ? null : () => actor._upChevron.hide());
         this._positionLabel(
             actor._selectionLabel,
             geometry.width,
-            isEntered ? downChevronY + 8 : downChevronY + CHEVRON_SIZE + 16,
+            downChevronY + (isEntered ? 8 : CHEVRON_SIZE + 16) * spacingScale,
+            chromeScale,
             animate);
     }
 
@@ -771,6 +564,14 @@ class SwitcherView extends St.Widget {
                 exitComplete: null,
             };
             entry.signal = source.connect('destroy', () => {
+                const geometrySignals = this._sourceGeometrySignals.get(source);
+                if (geometrySignals !== undefined) {
+                    for (const signal of geometrySignals)
+                        source.disconnect(signal);
+                    this._sourceGeometrySignals.delete(source);
+                    this._queueGeometryRefresh();
+                }
+                targetActor._previewActors = targetActor._previewActors.filter(actor => actor !== preview);
                 preview.destroy();
                 entry.clone = null;
                 entry.source = null;
@@ -781,12 +582,59 @@ class SwitcherView extends St.Widget {
                     entry.exitComplete();
             });
             this._cloneEntries.push(entry);
+            if (!this._sourceGeometrySignals.has(source)) {
+                let previousRect = surface.get_buffer_rect();
+                const geometryChanged = () => {
+                    const rect = surface.get_buffer_rect();
+                    // Shell effects transform actors without changing window geometry.
+                    if (['x', 'y', 'width', 'height'].every(property => rect[property] === previousRect[property]))
+                        return;
+                    previousRect = rect;
+                    this._queueGeometryRefresh();
+                };
+                const signals = ['position', 'size', 'allocation', 'scale-x', 'scale-y', 'translation-x', 'translation-y']
+                    .map(property => source.connect(`notify::${property}`, geometryChanged));
+                this._sourceGeometrySignals.set(source, signals);
+            }
         }
         return true;
     }
 
+    _queueGeometryRefresh() {
+        if (this._geometryLaterId !== 0)
+            return;
+        this._geometryLaterId = global.compositor.get_laters().add(Meta.LaterType.BEFORE_REDRAW, () => {
+            this._geometryLaterId = 0;
+            this._refreshGeometry();
+            return false;
+        });
+    }
+
+    _disconnectSourceGeometry() {
+        if (this._geometryLaterId !== 0) {
+            global.compositor.get_laters().remove(this._geometryLaterId);
+            this._geometryLaterId = 0;
+        }
+        for (const [source, signals] of this._sourceGeometrySignals) {
+            for (const signal of signals)
+                source.disconnect(signal);
+        }
+        this._sourceGeometrySignals.clear();
+    }
+
+    _refreshGeometry() {
+        this._themeScale = this._themeContext.scale_factor;
+        this._fullLayout = calculateFullLayout(
+            this._targets, this._workArea, recordBounds, this._measureTitleHeights(), this._themeScale);
+        // Settle immediately: tweening from the old aspect ratio stretches resized sources.
+        this._applyComposition(false);
+        if (this._selectedIndex >= 0)
+            this._targetActors[this._selectedIndex]._selectionLabel.opacity = 255;
+    }
+
     _createUnavailableTarget(target, index, geometry, targetActor) {
-        const icon = this._createIcon(target.application, Math.max(1, Math.min(ICON_SIZE, geometry.height)));
+        const iconSize = Math.max(1, Math.floor(Math.min(ICON_SIZE, geometry.width / this._themeScale, geometry.height / this._themeScale)));
+        const icon = this._createIcon(target.application, iconSize);
         const placeholder = new St.Bin({
             style_class: 'switcher-preview-unavailable',
             child: icon,
@@ -809,25 +657,42 @@ class SwitcherView extends St.Widget {
         });
     }
 
+    _measureTitleHeights() {
+        const heights = {window: 0, app: 0};
+        this._targets.forEach((target, index) => {
+            const label = this._targetActors[index]._selectionLabel;
+            label.ensure_style();
+            const [, height] = label.vfunc_get_preferred_height(-1);
+            const kind = target.kind === 'app-group' ? 'app' : 'window';
+            heights[kind] = Math.max(heights[kind], height);
+        });
+        return heights;
+    }
+
     _build(initialState = null) {
+        this._themeScale = this._themeContext.scale_factor;
         this._backdropActor = new St.Widget({
             style_class: 'switcher-backdrop',
             reactive: false,
         });
-        this._backdropActor.set_size(global.stage.width, global.stage.height);
+        this._backdropActor.set_position(this._workArea.x, this._workArea.y);
+        this._backdropActor.set_size(this._workArea.width, this._workArea.height);
         this.add_child(this._backdropActor);
         this._chromeActors.push(this._backdropActor);
-        this._fullLayout = calculateFullLayout(this._targets);
-        for (const group of this._fullLayout.groups) {
-            const geometry = this._fullLayout.geometries.get(group.index);
-            this._createGroupTarget(group, geometry);
-        }
+        this._targets.forEach((target, index) => {
+            if (target.kind === 'app-group')
+                this._createGroupTarget({target, index});
+            else
+                this._createWindowTarget(target, index);
+        });
+        this._fullLayout = calculateFullLayout(
+            this._targets, this._workArea, recordBounds, this._measureTitleHeights(), this._themeScale);
+        this._applyComposition(false);
 
         this._targets.forEach((target, index) => {
             if (target.kind === 'app-group')
                 return;
             const geometry = this._fullLayout.geometries.get(index);
-            this._createWindowTarget(target, index, geometry);
             const targetActor = this._targetActors[index];
             if (!this._createClones(target, index, geometry, targetActor, initialState?.surfaces))
                 this._createUnavailableTarget(target, index, geometry, targetActor);
@@ -966,9 +831,10 @@ class SwitcherView extends St.Widget {
     }
 
     _setHiddenPreviewProperties(entry, properties, destination, animate, duration) {
-        if (!animate) {
+        if (!animate || !entry.clone.visible) {
             this._setActorProperties(entry.clone, properties, false);
             this._rebasePreview(entry, destination, {...destination, opacity: 0});
+            entry.clone.hide();
             return;
         }
 
@@ -981,7 +847,7 @@ class SwitcherView extends St.Widget {
             () => {
                 this._rebasePreview(entry, destination, {...destination, opacity: 1});
                 this._setActorProperties(
-                    entry.clone, {opacity: 0}, true, finalFadeDuration);
+                    entry.clone, {opacity: 0}, true, finalFadeDuration, () => entry.clone.hide());
             });
     }
 
@@ -1007,7 +873,7 @@ class SwitcherView extends St.Widget {
         animate &&= St.Settings.get().enable_animations;
         const entered = this._enteredApplication === null
             ? null
-            : calculateEnteredLayout(this._targets, this._enteredApplication);
+            : calculateEnteredLayout(this._targets, this._enteredApplication, this._workArea, recordBounds, this._measureTitleHeights(), this._themeScale);
         const enteredIndices = entered === null
             ? new Set()
             : new Set(entered.geometries.keys());
@@ -1033,6 +899,13 @@ class SwitcherView extends St.Widget {
                 : this._fullLayout.geometries.get(index);
             const visible = entered === null || enteredIndices.has(index);
             const staged = stagedDirectIndices.has(index);
+            if (visible)
+                actor.show();
+            actor.can_focus = visible && (entered === null
+                ? target.kind !== 'grouped-window'
+                : target.kind === 'grouped-window');
+            actor._clickGesture.set_enabled(visible && (target.kind !== 'app-group' || entered === null));
+            const onComplete = visible ? null : () => actor.hide();
             const properties = {
                 x: geometry.x,
                 y: geometry.y,
@@ -1041,30 +914,31 @@ class SwitcherView extends St.Widget {
                 opacity: visible ? 255 : 0,
             };
             if (lateChrome) {
-                this._setLateFadeProperties(actor, properties, animate, duration);
+                this._setLateFadeProperties(actor, properties, animate, duration, onComplete);
             } else if (staged && groupTransition.entering === false) {
-                this._setLateFadeProperties(actor, properties, animate, duration);
+                this._setLateFadeProperties(actor, properties, animate, duration, onComplete);
             } else {
                 this._setActorProperties(
-                    actor, properties, animate, staged ? stagedDuration : duration);
+                    actor, properties, animate, staged ? stagedDuration : duration, onComplete);
             }
 
             if (target.kind === 'app-group') {
                 const isEntered = entered !== null && index === entered.groupIndex;
                 actor.reactive = entered === null || isEntered;
-                actor._downChevron.reactive = entered === null;
-                actor._upChevron.reactive = isEntered;
                 this._positionGroupChrome(
                     actor, geometry, entered !== null, isEntered,
                     animate, duration, lateChrome);
             } else {
                 actor.reactive = visible;
-                if (target.kind === 'direct-window')
+                actor._selectionLabel.reactive = visible;
+                if (target.kind === 'direct-window') {
+                    actor._directIcon.reactive = visible;
                     this._positionDirectIcon(actor, geometry, animate);
-                const labelY = geometry.height + 8 + (target.kind === 'direct-window'
-                    ? Math.max(1, Math.min(DIRECT_ICON_SIZE, geometry.height / 3)) / 2
+                }
+                const labelY = geometry.height + 8 * this._themeScale * geometry.chromeScale + (target.kind === 'direct-window'
+                    ? Math.min(DIRECT_ICON_SIZE * this._themeScale * geometry.chromeScale, geometry.height / 3, geometry.width) / 2
                     : 0);
-                this._positionLabel(actor._selectionLabel, geometry.width, labelY, animate);
+                this._positionLabel(actor._selectionLabel, geometry.width, labelY, geometry.chromeScale, animate);
             }
         });
 
@@ -1073,6 +947,8 @@ class SwitcherView extends St.Widget {
                 continue;
             const target = this._targets[entry.targetIndex];
             const visible = entered === null || enteredIndices.has(entry.targetIndex);
+            if (visible)
+                entry.clone.show();
             const staged = stagedDirectIndices.has(entry.targetIndex);
             const geometry = enteredIndices.has(entry.targetIndex)
                 ? entered.geometries.get(entry.targetIndex)
@@ -1080,15 +956,23 @@ class SwitcherView extends St.Widget {
             const destination = entry.surface === null
                 ? geometry
                 : destinationForSurface(target, entry.surface, geometry);
+            if (entry.surface === null) {
+                entry.clone.child.icon_size = Math.max(1, Math.floor(Math.min(
+                    ICON_SIZE, geometry.width / this._themeScale, geometry.height / this._themeScale)));
+            }
             const properties = entry.surface === null
                 ? destination
                 : previewProperties(entry, destination);
-            const settle = entry.surface === null
-                ? null
-                : () => this._rebasePreview(entry, destination, {
-                    ...destination,
-                    opacity: visible ? 255 : 0,
-                });
+            const settle = () => {
+                if (entry.surface !== null) {
+                    this._rebasePreview(entry, destination, {
+                        ...destination,
+                        opacity: visible ? 255 : 0,
+                    });
+                }
+                if (!visible)
+                    entry.clone.hide();
+            };
             const presentedProperties = {...properties, opacity: visible ? 255 : 0};
             const backingChanges = entry.surface !== null &&
                 (entry.baseWidth !== Math.max(1, Math.round(destination.width)) ||
@@ -1115,7 +999,7 @@ class SwitcherView extends St.Widget {
     }
 
     enterGroup(application) {
-        const entered = calculateEnteredLayout(this._targets, application);
+        const entered = calculateEnteredLayout(this._targets, application, this._workArea, recordBounds, this._measureTitleHeights(), this._themeScale);
         this._targets.forEach((target, index) => {
             if (target.kind !== 'grouped-window' || target.application !== application)
                 return;
@@ -1174,9 +1058,9 @@ class SwitcherView extends St.Widget {
                 initialState.groups.set(target.application, {
                     actor: actorGeometry(actor),
                     icon: transformedActorState(actor._iconBin),
-                    downChevron: actorGeometry(actor._downChevron),
-                    upChevron: actorGeometry(actor._upChevron),
-                    label: actorGeometry(actor._selectionLabel),
+                    downChevron: transformedActorState(actor._downChevron),
+                    upChevron: transformedActorState(actor._upChevron),
+                    label: transformedActorState(actor._selectionLabel),
                     outline: actorGeometry(actor._groupOutline),
                 });
             } else {
@@ -1185,7 +1069,7 @@ class SwitcherView extends St.Widget {
                     icon: actor._directIcon === undefined
                         ? null
                         : transformedActorState(actor._directIcon),
-                    label: actorGeometry(actor._selectionLabel),
+                    label: transformedActorState(actor._selectionLabel),
                 });
             }
         });
@@ -1235,6 +1119,7 @@ class SwitcherView extends St.Widget {
             selected._selectionLabel.opacity = 255;
         }
         selected.add_accessible_state(Atk.StateType.SELECTED);
+        selected.grab_key_focus();
     }
 
     setExitTarget(index) {
@@ -1257,11 +1142,20 @@ class SwitcherView extends St.Widget {
     }
 
     beginExit(onComplete) {
+        this._disconnectKeyFocus();
+        this._disconnectTheme();
+        this._disconnectSourceGeometry();
+        for (const {gesture} of this._clickActions)
+            gesture.set_enabled(false);
         for (const actor of this._targetActors) {
             if (actor === undefined)
                 continue;
             visitActorTree(actor, child => {
+                if (child instanceof St.Button)
+                    child.fake_release();
                 child.reactive = false;
+                if (child instanceof St.Widget)
+                    child.can_focus = false;
                 child.remove_all_transitions();
             });
         }
@@ -1306,14 +1200,18 @@ class SwitcherView extends St.Widget {
             .map(entry => ({
                 entry,
                 sourceRect: entry.targetIndex === heroIndex && entry.source !== null
-                    ? sourceGeometry(entry.source)
+                    ? entry.source.get_meta_window().get_buffer_rect()
                     : null,
             }));
+        for (const {entry, sourceRect} of exits) {
+            if (sourceRect !== null)
+                entry.clone.show();
+        }
         if (!St.Settings.get().enable_animations) {
             for (const {entry, sourceRect} of exits) {
                 if (sourceRect !== null) {
                     this._setActorProperties(
-                        entry.clone, previewProperties(entry, sourceRect), false);
+                        entry.clone, {...previewProperties(entry, sourceRect), opacity: 255}, false);
                 } else {
                     entry.clone.opacity = 0;
                 }
@@ -1364,29 +1262,44 @@ class SwitcherView extends St.Widget {
     }
 
     _clearActors() {
+        this._disconnectSourceGeometry();
+        for (const {actor, gesture, signal, sequenceSignal} of this._clickActions) {
+            gesture.disconnect(signal);
+            if (sequenceSignal !== 0)
+                gesture.disconnect(sequenceSignal);
+            actor.remove_action(gesture);
+            actor._clickGesture = null;
+        }
+        this._clickActions = [];
         visitActorTree(this, actor => actor.remove_all_transitions());
         for (const {clone, source, signal} of this._cloneEntries) {
             if (signal !== 0)
                 source.disconnect(signal);
         }
         this._cloneEntries = [];
+        this._targetActors = [];
         this.destroy_all_children();
         this._backdropActor = null;
     }
 
     destroy() {
+        this._disconnectKeyFocus();
+        this._disconnectTheme();
         this._clearActors();
         this._targets = Object.freeze([]);
         this._targetActors = [];
         this._chromeActors = [];
         this._backdropActor = null;
         this._fullLayout = null;
+        this._workArea = null;
         this._enteredApplication = null;
         this._exitTargetIndex = null;
         this._entranceTargetIndex = -1;
         this._activateTarget = null;
         this._enterGroupRequested = null;
         this._leaveGroupRequested = null;
+        this._pointerMoved = null;
+        this._targetFocused = null;
         super.destroy();
     }
 });
