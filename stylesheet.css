@@ -14,10 +14,6 @@
   box-shadow: none;
 }
 
-.switcher-direct-target:hover {
-  border-color: -st-accent-color;
-}
-
 .switcher-preview-unavailable {
   background-color: rgba(40, 40, 40, 0.85);
   border-radius: 12px;
@@ -48,8 +44,7 @@
   border-radius: 12px;
 }
 
-.switcher-group-outline.switcher-selected,
-.switcher-group-outline.switcher-hovered {
+.switcher-group-outline.switcher-selected {
   border-color: -st-accent-color;
 }
 

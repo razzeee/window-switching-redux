@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "test": "node --test tests/*.test.js",
-    "pack": "gnome-extensions pack . -f -o dist $(printf ' --extra-source=%s' windowModel.js switcher*.js)"
+    "test:shell": "npm run pack && node tests/run-shell-tests.js",
+    "pack": "gnome-extensions pack . -f -o dist $(printf ' --extra-source=%s' LICENSE COPYING windowModel.js switcher*.js)"
   }
 }

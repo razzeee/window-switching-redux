@@ -3,7 +3,6 @@
 // and can maintain this code.
 
 import Clutter from 'gi://Clutter';
-import GLib from 'gi://GLib';
 import GObject from 'gi://GObject';
 import Meta from 'gi://Meta';
 import St from 'gi://St';
@@ -46,7 +45,7 @@ class SwitcherSession extends St.Widget {
         this._view = null;
         this._windowSignals = new Map();
         this._systemModalSignal = 0;
-        this._noModifierTimeout = 0;
+        this._pointerPosition = global.get_pointer().slice(0, 2);
     }
 
     start() {
@@ -58,25 +57,20 @@ class SwitcherSession extends St.Widget {
             this._startingWindow,
             (index, timestamp) => this._activateIndex(index, timestamp),
             application => this._enterGroup(application),
-            () => this._leaveGroup());
+            () => this._leaveGroup(),
+            (index, event) => this._onPointerMotion(index, event),
+            index => this._selectIndex(index));
         this._startingWindow = null;
         this.add_child(this._view);
         this._view.build();
-        this._view.setSelection(this._selectedIndex);
         this._connectWindowSignals();
         this._systemModalSignal = Main.layoutManager.connect(
             'system-modal-opened', () => this._finish(false, true));
 
         this._grab = Main.pushModal(this);
-        this.grab_key_focus();
+        this._view.setSelection(this._selectedIndex);
 
-        if (this._modifierMask === 0) {
-            this._noModifierTimeout = GLib.timeout_add_once(
-                GLib.PRIORITY_DEFAULT, 500, () => {
-                    this._noModifierTimeout = 0;
-                    this._finish(true, false, global.get_current_time());
-                });
-        } else {
+        if (this._modifierMask !== 0) {
             const [, , modifiers] = global.get_pointer();
             if ((modifiers & this._modifierMask) === 0)
                 this._finish(true, false, global.get_current_time());
@@ -101,10 +95,6 @@ class SwitcherSession extends St.Widget {
     }
 
     _disconnectInput() {
-        if (this._noModifierTimeout !== 0) {
-            GLib.source_remove(this._noModifierTimeout);
-            this._noModifierTimeout = 0;
-        }
         if (this._grab !== null) {
             Main.popModal(this._grab);
             this._grab = null;
@@ -122,6 +112,7 @@ class SwitcherSession extends St.Widget {
         if (this._grab === null)
             return;
 
+        this._pointerPosition = global.get_pointer().slice(0, 2);
         this._lastDirection = direction;
         const indices = this._enteredApplication === null
             ? getTopLevelIndices(this._targets)
@@ -142,6 +133,7 @@ class SwitcherSession extends St.Widget {
         const indices = getGroupIndices(this._targets, target.application);
         if (indices.length === 0)
             return;
+        this._pointerPosition = global.get_pointer().slice(0, 2);
         this._enteredApplication = target.application;
         this._selectedIndex = indices[0];
         this._view.enterGroup(target.application);
@@ -152,6 +144,7 @@ class SwitcherSession extends St.Widget {
         if (this._enteredApplication === null)
             return;
 
+        this._pointerPosition = global.get_pointer().slice(0, 2);
         const groupIndex = this._targets.findIndex(target =>
             target.kind === 'app-group' &&
             target.application === this._enteredApplication);
@@ -238,12 +231,50 @@ class SwitcherSession extends St.Widget {
         return target.window;
     }
 
-    _activateIndex(index, timestamp) {
+    _selectIndex(index) {
         if (this._grab === null || index < 0 || index >= this._targets.length)
+            return false;
+
+        const target = this._targets[index];
+        if (this._enteredApplication !== null) {
+            if (target.kind !== 'grouped-window' || target.application !== this._enteredApplication)
+                return false;
+        } else if (target.kind === 'grouped-window') {
+            index = this._targets.findIndex(candidate =>
+                candidate.kind === 'app-group' && candidate.application === target.application);
+            if (index < 0)
+                return false;
+        }
+
+        if (index !== this._selectedIndex) {
+            this._selectedIndex = index;
+            this._view.setSelection(index);
+        }
+        return true;
+    }
+
+    _onPointerMotion(index, event) {
+        if (this._grab === null ||
+            (event.get_flags() & Clutter.EventFlags.FLAG_SYNTHETIC) !== 0 ||
+            event.is_pointer_emulated())
             return;
 
-        this._selectedIndex = index;
-        this._view.setSelection(index);
+        // Shell's pointer query uses integers; event coordinates can be fractional.
+        const position = event.get_coords().map(Math.trunc);
+        if (position[0] === this._pointerPosition[0] && position[1] === this._pointerPosition[1])
+            return;
+        this._pointerPosition = position;
+        this._selectIndex(index);
+    }
+
+    vfunc_motion_event(event) {
+        this._onPointerMotion(-1, event);
+        return Clutter.EVENT_PROPAGATE;
+    }
+
+    _activateIndex(index, timestamp) {
+        if (!this._selectIndex(index))
+            return;
         this._finish(true, false, timestamp);
     }
 
@@ -268,6 +299,7 @@ class SwitcherSession extends St.Widget {
         const onFinished = this._onFinished;
         this._onFinished = null;
         this._targets = Object.freeze([]);
+        this._pointerPosition = null;
         super.destroy();
 
         if (synchronous) {
@@ -279,7 +311,26 @@ class SwitcherSession extends St.Widget {
         }
     }
 
+    vfunc_captured_event(event) {
+        if (event.type() === Clutter.EventType.KEY_PRESS)
+            return this.vfunc_key_press_event(event);
+        if (event.type() === Clutter.EventType.KEY_RELEASE)
+            return this.vfunc_key_release_event(event);
+        return Clutter.EVENT_PROPAGATE;
+    }
+
     vfunc_key_press_event(event) {
+        const action = global.display.get_keybinding_action(
+            event.get_key_code(), event.get_state());
+        if (action === Meta.KeyBindingAction.SWITCH_APPLICATIONS) {
+            this.advance(1);
+            return Clutter.EVENT_STOP;
+        }
+        if (action === Meta.KeyBindingAction.SWITCH_APPLICATIONS_BACKWARD) {
+            this.advance(-1);
+            return Clutter.EVENT_STOP;
+        }
+
         const symbol = event.get_key_symbol();
         if (symbol === Clutter.KEY_Escape) {
             this._finish(false, false, event.get_time());
@@ -306,17 +357,6 @@ class SwitcherSession extends St.Widget {
             return Clutter.EVENT_STOP;
         }
 
-        const action = global.display.get_keybinding_action(
-            event.get_key_code(), event.get_state());
-        if (action === Meta.KeyBindingAction.SWITCH_APPLICATIONS) {
-            this.advance(1);
-            return Clutter.EVENT_STOP;
-        }
-        if (action === Meta.KeyBindingAction.SWITCH_APPLICATIONS_BACKWARD) {
-            this.advance(-1);
-            return Clutter.EVENT_STOP;
-        }
-
         return Clutter.EVENT_STOP;
     }
 
@@ -337,6 +377,7 @@ class SwitcherSession extends St.Widget {
         this._enteredApplication = null;
         this._startingWindow = null;
         this._onFinished = null;
+        this._pointerPosition = null;
         super.destroy();
     }
 });

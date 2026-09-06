@@ -32,8 +32,11 @@ export function buildTraversal(windowRecords, recentLimit) {
     const groups = new Map();
 
     records.forEach((record, index) => {
-        if (record.application === null)
+        if (record.application === null) {
+            if (index >= recentLimit)
+                targets.push(directTarget(record));
             return;
+        }
 
         if (!groups.has(record.application))
             groups.set(record.application, {records: [], eligible: false});
