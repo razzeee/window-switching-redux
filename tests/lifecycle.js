@@ -196,16 +196,21 @@ export async function testLifecycle(extension) {
             const chevron = entered ? group._upChevron : group._downChevron;
             assert(chevron.mapped, 'ATK focus fixture uses a visible chevron');
             assert(chevron.get_accessible().grab_focus(), 'ATK chevron focus request succeeds');
-            assert(assertOpen('Chevron focus normalization') === focused && focused._selectedIndex === expectedIndex,
-                'Chevron focus returns to its valid navigation target');
+            assert(controller()._session === focused && focused._selectedIndex === expectedIndex,
+                'Chevron focus preserves the associated navigation selection');
+            assert(focused._grab !== null && Main.modalCount === modalCount + 1, 'Chevron focus retains the modal grab');
+            assert(global.stage.get_key_focus() === chevron, 'Visible chevron retains ATK focus');
             assert((focused._enteredApplication !== null) === entered, 'Chevron focus alone does not change scope');
-            const expectedWindow = selectedWindow(focused);
             key(Clutter.KEY_Return);
             await settle();
-            assertClosed('Confirmation after chevron focus');
-            assert(global.display.focus_window === expectedWindow, 'Return activates the normalized focus destination');
+            assert(assertOpen('Confirmation after chevron focus') === focused, 'Chevron confirmation keeps the session open');
+            assert((focused._enteredApplication !== null) !== entered, 'Return changes the group scope');
+            assert(global.stage.get_key_focus() === focused._view._targetActors[focused._selectedIndex], 'Scope change restores target focus');
+            key(Clutter.KEY_Escape);
+            await settle();
+            assertClosed('Cancel after chevron confirmation');
         }
-        console.log('PASS: local ATK chevron focus returns to the owning group or current entered target before confirmation');
+        console.log('PASS: local ATK chevron focus and confirmation operate group scope without activating a window');
 
         const minimizedWindow = global.display.focus_window;
         assert(minimizedWindow !== null && !minimizedWindow.is_maximized(), 'Minimize fixture has a nonmaximized window');

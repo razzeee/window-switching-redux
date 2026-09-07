@@ -202,6 +202,9 @@ class SwitcherView extends St.Widget {
         this._targetActors = [];
         this._cloneEntries = [];
         this._sourceGeometrySignals = new Map();
+        this._windowTitleSignals = new Map();
+        this._pendingTitleLabels = new Set();
+        this._titleLaterId = 0;
         this._geometryLaterId = 0;
         this._themeContext = St.ThemeContext.get_for_stage(global.stage);
         this._themeScale = this._themeContext.scale_factor;
@@ -240,6 +243,14 @@ class SwitcherView extends St.Widget {
                 return;
             if (this._targetActors[index].reactive && index !== this._selectedIndex)
                 this._targetFocused(index);
+            const owner = this._targetActors[index];
+            const chevron = [owner._downChevron, owner._upChevron].find(button =>
+                button?.visible && button.reactive && button.can_focus && button.contains(focused));
+            if (chevron !== undefined) {
+                if (chevron !== global.stage.get_key_focus())
+                    chevron.grab_key_focus();
+                return;
+            }
             // ATK can focus descendants and targets outside the navigation scope.
             const selected = this._targetActors[this._selectedIndex];
             if (selected?.can_focus && selected !== global.stage.get_key_focus())
@@ -252,6 +263,24 @@ class SwitcherView extends St.Widget {
             global.stage.disconnect(this._keyFocusSignalId);
             this._keyFocusSignalId = 0;
         }
+    }
+
+    activateFocusedChevron() {
+        const focused = global.stage.get_key_focus();
+        for (const [index, actor] of this._targetActors.entries()) {
+            if (this._targets[index].kind !== 'app-group')
+                continue;
+            for (const button of [actor._downChevron, actor._upChevron]) {
+                if (focused !== button || !button.visible || !button.reactive || !button.can_focus)
+                    continue;
+                if (button === actor._downChevron)
+                    this._enterGroupRequested(this._targets[index].application);
+                else
+                    this._leaveGroupRequested();
+                return true;
+            }
+        }
+        return false;
     }
 
     _disconnectTheme() {
@@ -287,13 +316,25 @@ class SwitcherView extends St.Widget {
         return clickAction;
     }
 
-    _positionLabel(label, previewWidth, y, chromeScale, animate = false) {
+    _positionLabel(label, previewWidth, y, chromeScale, animate = false, titleOnly = false) {
+        label._titleLayout = [previewWidth, y, chromeScale];
         // GNOME 50 St.Label applies its font in style-changed, even when hidden.
         label.ensure_style();
         // Bypass explicit dimensions from the previous layout or rebuild.
         const [, naturalWidth] = label.vfunc_get_preferred_width(-1);
         const width = Math.min(previewWidth / chromeScale, naturalWidth);
         const [, height] = label.vfunc_get_preferred_height(-1);
+        if (titleOnly) {
+            // Retarget the existing timeline without resetting its opacity or completion callback.
+            for (const [property, value] of Object.entries({x: (previewWidth - width * chromeScale) / 2, width, height})) {
+                const transition = label.get_transition(property);
+                if (transition !== null)
+                    transition.set_to(value);
+                else
+                    label[property] = value;
+            }
+            return;
+        }
         this._setActorProperties(label, {
             x: (previewWidth - width * chromeScale) / 2,
             y,
@@ -337,6 +378,44 @@ class SwitcherView extends St.Widget {
         actor._selectionActor = actor;
         this._chromeActors.push(actor);
         this._targetActors[index] = actor;
+        if (!this._windowTitleSignals.has(target.window)) {
+            const signal = target.window.connect('notify::title', () => {
+                const title = target.window.get_title();
+                this._targets.forEach((candidate, targetIndex) => {
+                    if (candidate.kind === 'app-group' || candidate.window !== target.window)
+                        return;
+                    const targetActor = this._targetActors[targetIndex];
+                    targetActor._selectionLabel.text = title;
+                    targetActor.accessible_name = title;
+                    this._queueTitleRefresh(targetActor._selectionLabel);
+                });
+            });
+            this._windowTitleSignals.set(target.window, signal);
+        }
+    }
+
+    _queueTitleRefresh(label) {
+        this._pendingTitleLabels.add(label);
+        if (this._titleLaterId !== 0)
+            return;
+        this._titleLaterId = global.compositor.get_laters().add(Meta.LaterType.BEFORE_REDRAW, () => {
+            this._titleLaterId = 0;
+            for (const pendingLabel of this._pendingTitleLabels)
+                this._positionLabel(pendingLabel, ...pendingLabel._titleLayout, false, true);
+            this._pendingTitleLabels.clear();
+            return false;
+        });
+    }
+
+    _disconnectWindowTitles() {
+        if (this._titleLaterId !== 0) {
+            global.compositor.get_laters().remove(this._titleLaterId);
+            this._titleLaterId = 0;
+        }
+        this._pendingTitleLabels.clear();
+        for (const [window, signal] of this._windowTitleSignals)
+            window.disconnect(signal);
+        this._windowTitleSignals.clear();
     }
 
     _positionDirectIcon(actor, geometry, animate) {
@@ -452,6 +531,7 @@ class SwitcherView extends St.Widget {
         const upChevronY = geometry.iconY - (CHEVRON_SIZE + 8) * spacingScale;
         for (const [button, visible] of [[actor._downChevron, !entered], [actor._upChevron, isEntered]]) {
             button.reactive = visible;
+            button.can_focus = visible;
             if (visible)
                 button.show();
             else
@@ -1142,6 +1222,7 @@ class SwitcherView extends St.Widget {
     }
 
     beginExit(onComplete) {
+        this._disconnectWindowTitles();
         this._disconnectKeyFocus();
         this._disconnectTheme();
         this._disconnectSourceGeometry();
@@ -1262,6 +1343,7 @@ class SwitcherView extends St.Widget {
     }
 
     _clearActors() {
+        this._disconnectWindowTitles();
         this._disconnectSourceGeometry();
         for (const {actor, gesture, signal, sequenceSignal} of this._clickActions) {
             gesture.disconnect(signal);

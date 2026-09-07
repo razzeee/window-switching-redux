@@ -2,6 +2,7 @@
 // Do NOT upload to extensions.gnome.org (EGO) unless you understand JavaScript
 // and can maintain this code.
 
+import Atk from 'gi://Atk';
 import Clutter from 'gi://Clutter';
 import GLib from 'gi://GLib';
 import Pango from 'gi://Pango';
@@ -71,6 +72,94 @@ async function testLabel(view, index) {
     assertNear(label.scale_x, 0.75, 'Animated title scale');
     assert(label.get_transition('width') === null, 'Width transition finishes');
     console.log('PASS: real St label short/wide sizing, animation and reversal');
+}
+
+async function testTitleNotification(view) {
+    const directIndex = view._targets.findIndex(target => target.kind === 'direct-window' &&
+        view._targets.some(candidate => candidate.kind === 'grouped-window' && candidate.window === target.window));
+    assert(directIndex >= 0, 'Title fixture needs duplicate representations of a real window');
+    const window = view._targets[directIndex].window;
+    const actors = view._targets.flatMap((target, index) => target.window === window ? [view._targetActors[index]] : []);
+    assert(actors.length === 2, 'Title fixture has direct and grouped window targets');
+    const title = window.get_title();
+    const staleTitle = 'Stale title signal fixture with deliberately different text';
+    assert(title !== staleTitle, 'Signal fixture differs from the real Meta.Window title');
+    const preview = view._cloneEntries.find(entry => entry.targetIndex === directIndex).clone;
+    const layout = view._fullLayout;
+    try {
+        view.setSelection(directIndex);
+        for (const actor of actors) {
+            actor.accessible_name = staleTitle;
+            const label = actor._selectionLabel;
+            label.text = staleTitle;
+            label.show();
+            view._positionLabel(label, 20, 20, 1);
+        }
+        await Scripting.waitLeisure();
+        const transitions = actors.map(actor => {
+            const label = actor._selectionLabel;
+            assert(label.mapped, 'Both title labels must be mapped for real transitions');
+            view._positionLabel(label, 1200, 30, 0.75, true);
+            label.opacity = 17;
+            label.ease({opacity: 200, duration: 1000});
+            const saved = new Map();
+            for (const property of ['x', 'width', 'y', 'scale-x', 'scale-y', 'opacity']) {
+                const transition = label.get_transition(property);
+                assert(transition !== null, `Title fixture creates a real ${property} transition`);
+                transition.set_duration(1000);
+                saved.set(property, transition);
+            }
+            return saved;
+        });
+        preview.ease({opacity: 100, duration: 1000});
+        const previewTransition = preview.get_transition('opacity');
+        assert(previewTransition !== null, 'Unrelated preview transition is active');
+        // Signal fixture, not a client rename: Shell 50's PerfHelper has no title-setting method.
+        window.notify('title');
+        for (const actor of actors) {
+            assert(actor._selectionLabel.text === title, 'Duplicate visual label rereads the real window title');
+            assert(actor.accessible_name === title, 'Duplicate explicit accessible name refreshes');
+            assert(actor.get_accessible().get_name() === title, 'Real ATK target name refreshes');
+        }
+        await new Promise(resolve => {
+            const signal = global.stage.connect('after-paint', () => {
+                global.stage.disconnect(signal);
+                resolve();
+            });
+            global.stage.queue_redraw();
+        });
+        assert(view._titleLaterId === 0, 'Title measurement runs before the next paint');
+        assert(view._fullLayout === layout, 'Title notification does not recalculate composition');
+        assert(preview.get_transition('opacity') === previewTransition, 'Title notification preserves unrelated preview animation');
+        actors.forEach((actor, index) => {
+            const label = actor._selectionLabel;
+            const [, naturalWidth] = label.vfunc_get_preferred_width(-1);
+            const width = Math.min(1600, naturalWidth);
+            for (const [property, transition] of transitions[index])
+                assert(label.get_transition(property) === transition, `Title refresh preserves the ${property} timeline`);
+            assertNear(transitions[index].get('width').get_interval().peek_final_value(), width, 'Active width endpoint rereads title metrics');
+            assertNear(transitions[index].get('x').get_interval().peek_final_value(), (1200 - width * 0.75) / 2, 'Active x endpoint recenters title');
+            assertNear(transitions[index].get('opacity').get_interval().peek_final_value(), 200, 'Title refresh preserves opacity endpoint');
+            assert(label.opacity < 255, 'Title refresh does not force selected label opacity');
+        });
+        await Scripting.sleep(1100);
+        for (const actor of actors) {
+            const label = actor._selectionLabel;
+            const [, naturalWidth] = label.vfunc_get_preferred_width(-1);
+            const width = Math.min(1600, naturalWidth);
+            assertNear(label.width, width, 'Real title transition reaches retargeted width');
+            assertNear(label.x, (1200 - width * 0.75) / 2, 'Real title transition reaches retargeted center');
+        }
+        console.log('PASS: real Meta.Window notify::title signal fixture updates duplicate St/ATK names and retargets active label endpoints without cancelling preview animation');
+    } finally {
+        for (const actor of actors) {
+            actor._selectionLabel.text = title;
+            actor.accessible_name = title;
+            actor._selectionLabel.hide();
+        }
+        view._applyComposition(false);
+        view.setSelection(-1);
+    }
 }
 
 async function testInitialLabels(view) {
@@ -542,6 +631,98 @@ async function testSession(SwitcherSession, targets, startingWindow, groupIndex,
     }
 }
 
+async function testChevronConfirmation(SwitcherSession, targets, startingWindow, groupIndex) {
+    const seat = global.stage.context.get_backend().get_default_seat();
+    let keyboard = seat.create_virtual_device(Clutter.InputDeviceType.KEYBOARD_DEVICE);
+    const modalCount = Main.modalCount;
+    const application = targets[groupIndex].application;
+    let session = null;
+    let pressedKey = null;
+    let repeats = 0;
+    const settle = async () => {
+        await Scripting.sleep(300);
+        await Scripting.waitLeisure();
+    };
+    const key = async (symbol, hold = false) => {
+        if (symbol === Clutter.KEY_ISO_Enter) {
+            // The headless keymap has no ISO_Enter keycode for virtual-device injection.
+            session.vfunc_captured_event({
+                type: () => Clutter.EventType.KEY_PRESS,
+                get_key_symbol: () => symbol,
+                get_key_code: () => 0,
+                get_state: () => 0,
+                get_flags: () => 0,
+                get_time: () => global.get_current_time(),
+            });
+        } else {
+            const previousRepeats = repeats;
+            pressedKey = symbol;
+            keyboard.notify_keyval(GLib.get_monotonic_time(), symbol, Clutter.KeyState.PRESSED);
+            if (hold) {
+                await Scripting.sleep(1200);
+                assert(repeats > previousRepeats, 'Held confirmation fixture receives real autorepeat events');
+            }
+            keyboard.notify_keyval(GLib.get_monotonic_time(), symbol, Clutter.KeyState.RELEASED);
+            pressedKey = null;
+        }
+        await settle();
+    };
+    try {
+        for (const symbol of [Clutter.KEY_Return, Clutter.KEY_KP_Enter, Clutter.KEY_ISO_Enter, Clutter.KEY_space]) {
+            session = new SwitcherSession({
+                targets, startingWindow, direction: 1, modifierMask: 0,
+                timestamp: global.get_current_time(),
+                onFinished: (_session, view) => {
+                    session = null;
+                    if (view !== null)
+                        view.destroy();
+                },
+            });
+            // Observe delivery inside the modal grab; stage capture does not see these keys.
+            const keyPress = session.vfunc_key_press_event;
+            session.vfunc_key_press_event = function (event) {
+                if (event.get_key_symbol() === pressedKey && (event.get_flags() & Clutter.EventFlags.FLAG_REPEATED))
+                    repeats++;
+                return keyPress.call(this, event);
+            };
+            session.start();
+            await settle();
+            const view = session._view;
+            const group = view._targetActors[groupIndex];
+            for (const entered of [false, true]) {
+                const chevron = entered ? group._upChevron : group._downChevron;
+                const inactive = entered ? group._downChevron : group._upChevron;
+                assert(chevron.mapped && chevron.can_focus && chevron.reactive, 'Active chevron is operable');
+                assert(!inactive.visible && !inactive.can_focus, 'Inactive chevron is hidden and unfocusable');
+                const accessible = chevron.get_accessible();
+                assert(accessible instanceof Atk.Component, 'Chevron exposes real ATK focus');
+                assert(accessible.grab_focus(), 'ATK focuses active chevron');
+                assert(global.stage.get_key_focus() === chevron, 'Chevron retains ATK focus');
+                assert((session._enteredApplication !== null) === entered, 'Focus alone does not change scope');
+                await key(symbol, symbol === Clutter.KEY_Return || symbol === Clutter.KEY_space);
+                assert(session !== null && Main.modalCount === modalCount + 1, 'Chevron confirmation retains session and grab');
+                assert(session._enteredApplication === (entered ? null : application), 'Confirmation operates the focused chevron');
+                assert(global.stage.get_key_focus() === view._targetActors[session._selectedIndex], 'Scope transition restores target focus');
+                assert(!chevron.visible && !chevron.can_focus, 'Operated chevron becomes hidden and unfocusable');
+                assert(chevron.get_accessible().grab_focus(), 'ATK can request even a hidden actor');
+                assert(global.stage.get_key_focus() === view._targetActors[session._selectedIndex], 'Hidden chevron focus normalizes to selected target');
+            }
+            const expected = targets[groupIndex].windows[0].window;
+            await key(symbol);
+            assert(session === null && Main.modalCount === modalCount, 'Target confirmation finishes after leaving group');
+            assert(global.display.focus_window === expected, 'Every confirmation key activates the selected target');
+        }
+        console.log('PASS: real ATK chevron focus; virtual Return/KP_Enter/Space and captured ISO_Enter operate scope and targets with focus recovery');
+        console.log('PASS: held virtual Return/Space produce Mutter repeat events without committing after group transitions');
+    } finally {
+        if (pressedKey !== null)
+            keyboard.notify_keyval(GLib.get_monotonic_time(), pressedKey, Clutter.KeyState.RELEASED);
+        if (session !== null)
+            session.destroy();
+        keyboard = null;
+    }
+}
+
 export async function run() {
     await Main.extensionManager._initializationPromise;
     const extension = Main.extensionManager.lookup(
@@ -580,6 +761,7 @@ export async function run() {
             'Preview must clone the real helper window');
         assertWorkArea(view, workArea);
         await testInitialLabels(view);
+        await testTitleNotification(view);
         await testLabel(view, childIndex);
         await testLiveTheme(view, groupIndex, childIndex);
         await testPreviewMapping(view, targets[groupIndex].application);
@@ -617,6 +799,7 @@ export async function run() {
         view.destroy();
         view = null;
         await testSession(SwitcherSession, targets, startingWindow, groupIndex, childIndex);
+        await testChevronConfirmation(SwitcherSession, targets, startingWindow, groupIndex);
         await testLifecycle(extension);
     } finally {
         if (view !== null) {

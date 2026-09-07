@@ -320,6 +320,8 @@ class SwitcherSession extends St.Widget {
     }
 
     vfunc_key_press_event(event) {
+        if (this._grab === null)
+            return Clutter.EVENT_STOP;
         const action = global.display.get_keybinding_action(
             event.get_key_code(), event.get_state());
         if (action === Meta.KeyBindingAction.SWITCH_APPLICATIONS) {
@@ -336,8 +338,12 @@ class SwitcherSession extends St.Widget {
             this._finish(false, false, event.get_time());
             return Clutter.EVENT_STOP;
         }
-        if (symbol === Clutter.KEY_Return || symbol === Clutter.KEY_KP_Enter || symbol === Clutter.KEY_space) {
-            this._finish(true, false, event.get_time());
+        if (symbol === Clutter.KEY_Return || symbol === Clutter.KEY_KP_Enter || symbol === Clutter.KEY_ISO_Enter || symbol === Clutter.KEY_space) {
+            // Chevron activation restores target focus; a held key must not confirm that target.
+            if (event.get_flags() & Clutter.EventFlags.FLAG_REPEATED)
+                return Clutter.EVENT_STOP;
+            if (!this._view.activateFocusedChevron())
+                this._finish(true, false, event.get_time());
             return Clutter.EVENT_STOP;
         }
         if (symbol === Clutter.KEY_Down) {

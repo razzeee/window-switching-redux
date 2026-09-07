@@ -33,7 +33,7 @@ test('accessible focus follows selection across collapsed and entered group scop
     const makeActor = () => {
         const signals = new Map();
         const actor = {
-            reactive: true, can_focus: true,
+            reactive: true, can_focus: true, visible: true,
             connect(name, callback) { signals.set(name, callback); },
             add_action() {}, add_accessible_state() {}, remove_accessible_state() {},
             add_style_class_name() {}, remove_style_class_name() {},
@@ -58,6 +58,11 @@ test('accessible focus follows selection across collapsed and entered group scop
         for (const child of actor.children)
             child.children.push(makeActor()); // Icon children and Clutter.Text do not bubble focus.
         actor._groupOutline = makeActor(); // Group outline is a sibling, not a target child.
+    }
+    for (const index of [1, 4]) {
+        actors[index]._downChevron = actors[index].children[2];
+        actors[index]._upChevron = actors[index].children[3];
+        actors[index]._upChevron.visible = actors[index]._upChevron.can_focus = false;
     }
     const view = {...implementation, _targets: targets, _targetActors: actors,
         _selectedIndex: -1, _enteredApplication: null, _clickActions: [],
@@ -85,7 +90,9 @@ test('accessible focus follows selection across collapsed and entered group scop
             session._selectIndex(expected === 0 ? 1 : 0);
             child.grab_key_focus();
             assert.equal(session._selectedIndex, expected, 'descendant focus selects its scoped owner');
-            assert.equal(focused, actors[expected], 'focus must normalize to the navigation target');
+            const down = actor._downChevron;
+            const expectedFocus = down?.contains(child) ? down : actors[expected];
+            assert.equal(focused, expectedFocus, 'visible chevrons retain focus; decorative descendants normalize');
         }
     }
 
@@ -93,6 +100,10 @@ test('accessible focus follows selection across collapsed and entered group scop
     actors.forEach((actor, index) => {
         actor.can_focus = index === 2 || index === 3;
         actor.reactive = actor.can_focus || index === 1;
+        if (actor._downChevron) {
+            actor._downChevron.can_focus = actor._downChevron.visible = false;
+            actor._upChevron.can_focus = actor._upChevron.visible = index === 1;
+        }
     });
     session._selectIndex(2);
     actors[3].grab_key_focus();
@@ -101,7 +112,8 @@ test('accessible focus follows selection across collapsed and entered group scop
         for (const child of [actors[index], ...actors[index].children.flatMap(child => [child, ...child.children]), actors[index]._groupOutline]) {
             child.grab_key_focus();
             assert.equal(session._selectedIndex, 3, 'focus must not escape the entered scope');
-            assert.equal(focused, actors[3]);
+            const up = actors[1]._upChevron;
+            assert.equal(focused, up.contains(child) ? up : actors[3]);
         }
     }
     actors[2].children[1].children[0].grab_key_focus();
@@ -141,6 +153,59 @@ test('four narrow direct windows keep positioned icons within their own preview 
     });
     assert.ok(icons[0].right < icons[1].x);
     assert.ok(icons[2].right < icons[3].x);
+});
+
+test('confirmation activates only a visible, reactive, focusable chevron owned by the view', () => {
+    const method = viewSource.match(/    activateFocusedChevron\([^]*?\n    }/);
+    assert.ok(method, 'view must expose direct focused-chevron confirmation');
+    let focused = null;
+    const activate = new Function('global', `return ({${method[0]}}).activateFocusedChevron;`)(
+        {stage: {get_key_focus: () => focused}});
+    const down = {visible: true, reactive: true, can_focus: true};
+    const up = {...down};
+    const application = {};
+    const calls = [];
+    const view = {
+        _targets: [{kind: 'direct-window'}, {kind: 'app-group', application}],
+        _targetActors: [{}, {_downChevron: down, _upChevron: up}],
+        _enterGroupRequested: app => calls.push(app),
+        _leaveGroupRequested: () => calls.push(null),
+    };
+    for (const button of [down, up]) {
+        focused = button;
+        assert.equal(activate.call(view), true);
+        for (const property of ['visible', 'reactive', 'can_focus']) {
+            button[property] = false;
+            assert.equal(activate.call(view), false, `${property} is required for confirmation`);
+            button[property] = true;
+        }
+    }
+    for (focused of [null, {}, view._targetActors[1]])
+        assert.equal(activate.call(view), false);
+    assert.deepEqual(calls, [application, null]);
+});
+
+test('group composition makes only the active scope chevron focusable', () => {
+    const method = viewSource.match(/    _positionGroupChrome\([^]*?\n    }/)[0];
+    const position = new Function('ICON_SIZE', 'CHEVRON_SIZE', 'TRANSITION_TIME', 'Atk',
+        `return ({${method}})._positionGroupChrome;`)(120, CHEVRON_SIZE, 180, {StateType: {EXPANDED: 1}});
+    const button = () => ({show() { this.visible = true; }, hide() { this.visible = false; }, fake_release() {}});
+    const actor = {_downChevron: button(), _upChevron: button(), _groupOutline: {}, _iconBin: {},
+        add_accessible_state() {}, remove_accessible_state() {}};
+    const view = {_themeScale: 1, _positionLabel() {},
+        _setActorProperties(target, properties, _animate, _duration, complete = null) {
+            Object.assign(target, properties);
+            complete?.();
+        }};
+    const geometry = {x: 0, y: 0, width: 120, iconSize: 120, chromeScale: 1, iconX: 0, iconY: 32, previewX: 0, previewWidth: 0, previewHeight: 0};
+    for (const [entered, isEntered, down, up] of [[false, false, true, false], [true, true, false, true], [true, false, false, false], [false, false, true, false]]) {
+        position.call(view, actor, geometry, entered, isEntered, false);
+        for (const [chevron, expected] of [[actor._downChevron, down], [actor._upChevron, up]]) {
+            assert.equal(chevron.can_focus, expected);
+            assert.equal(chevron.reactive, expected);
+            assert.equal(chevron.visible, expected);
+        }
+    }
 });
 
 test('hidden label sizing applies style before querying unconstrained intrinsic width', () => {

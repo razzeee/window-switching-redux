@@ -8,11 +8,11 @@ import test from 'node:test';
 
 import {buildTraversal, getGroupIndices, getTopLevelIndices} from '../windowModel.js';
 
-const keys = ['Escape', 'Return', 'KP_Enter', 'space', 'Down', 'Up', 'Right', 'Left', 'Tab', 'x'];
+const keys = ['Escape', 'Return', 'KP_Enter', 'ISO_Enter', 'space', 'Down', 'Up', 'Right', 'Left', 'Tab', 'x'];
 const Clutter = {
     EVENT_STOP: true,
     EVENT_PROPAGATE: false,
-    EventFlags: {FLAG_SYNTHETIC: 1},
+    EventFlags: {FLAG_SYNTHETIC: 1, FLAG_REPEATED: 4},
     EventType: {KEY_PRESS: 1, KEY_RELEASE: 2, MOTION: 3, BUTTON_PRESS: 4, TOUCH_BEGIN: 5},
     ...Object.fromEntries(keys.map(key => [`KEY_${key}`, key])),
 };
@@ -71,6 +71,7 @@ function createSession(t, action = Meta.KeyBindingAction.NONE) {
         _lastDirection: 1,
         _grab: {},
         _view: {
+            activateFocusedChevron: () => false,
             setSelection: index => selections.push(index),
             enterGroup: app => groupChanges.push(app),
             leaveGroup: () => groupChanges.push(null),
@@ -106,11 +107,12 @@ function motion(session, index, coords = [30, 40], flags = 0, emulated = false) 
         session._onPointerMotion(index, event);
 }
 
-function press(session, key, state = 0) {
+function press(session, key, state = 0, flags = 0) {
     assert.equal(session.vfunc_key_press_event({
         get_key_symbol: () => Clutter[`KEY_${key}`],
         get_key_code: () => 42,
         get_state: () => state,
+        get_flags: () => flags,
         get_time: () => 1234,
     }), Clutter.EVENT_STOP);
 }
@@ -123,6 +125,7 @@ for (const [action, direction, state] of [
         for (const key of keys.filter(key => key !== 'x')) {
             test(`switch action ${direction} wins over ${key}, entered group ${entered}`, t => {
                 const {session, application, selections, groupChanges, finishes, lookups} = createSession(t, action);
+                session._view.activateFocusedChevron = () => assert.fail('binding must win over focused chevron');
                 session._selectedIndex = session._targets.findIndex(target => target.kind === 'app-group');
                 if (entered)
                     session._enterGroup();
@@ -143,18 +146,63 @@ for (const [action, direction, state] of [
                 assert.deepEqual(groupChanges, []);
                 assert.deepEqual(finishes, []);
                 assert.deepEqual(lookups, [[42, state]]);
+                const repeatedIndex = scope[(position + 2 * direction + scope.length * 2) % scope.length];
+                press(session, key, state, Clutter.EventFlags.FLAG_REPEATED);
+                assert.equal(session._selectedIndex, repeatedIndex, 'switching bindings continue to autorepeat');
+                assert.deepEqual(selections, [expectedIndex, repeatedIndex]);
+                assert.deepEqual(finishes, []);
             });
         }
     }
 }
 
-for (const key of ['Escape', 'Return', 'KP_Enter', 'space']) {
+for (const key of ['Escape', 'Return', 'KP_Enter', 'ISO_Enter', 'space']) {
     test(`unbound ${key} keeps its finish fallback`, t => {
         const {session, finishes, selections} = createSession(t);
         press(session, key);
         assert.deepEqual(finishes, [[key !== 'Escape', false, 1234]]);
         assert.deepEqual(selections, []);
     });
+}
+
+for (const key of ['Return', 'KP_Enter', 'ISO_Enter', 'space']) {
+    test(`${key} operates a focused chevron without committing the session`, t => {
+        const {session, finishes} = createSession(t);
+        session._modifierMask = 0;
+        let activated = 0;
+        session._view.activateFocusedChevron = () => { activated++; return true; };
+        press(session, key);
+        assert.equal(activated, 1);
+        assert.deepEqual(finishes, []);
+    });
+    for (const entered of [false, true]) {
+        test(`held ${key} does not commit after ${entered ? 'leaving' : 'entering'} a group`, t => {
+            const {session, application, finishes, groupChanges} = createSession(t);
+            session._modifierMask = 0;
+            if (entered)
+                session._enterGroup(application);
+            groupChanges.length = 0;
+            session._view.activateFocusedChevron = () => {
+                if (entered)
+                    session._leaveGroup();
+                else
+                    session._enterGroup(application);
+                // Scope changes restore target focus, so later confirmation would commit.
+                session._view.activateFocusedChevron = () => false;
+                return true;
+            };
+            press(session, key);
+            assert.equal(session._enteredApplication, entered ? null : application);
+            assert.deepEqual(groupChanges, [entered ? null : application]);
+            const selected = session._selectedIndex;
+            for (const flags of [Clutter.EventFlags.FLAG_REPEATED, Clutter.EventFlags.FLAG_REPEATED | Clutter.EventFlags.FLAG_SYNTHETIC])
+                press(session, key, 0, flags);
+            assert.deepEqual(finishes, [], 'autorepeat must not activate the newly focused window');
+            assert.equal(session._selectedIndex, selected);
+            press(session, key);
+            assert.deepEqual(finishes, [[true, false, 1234]], 'a second physical press still confirms');
+        });
+    }
 }
 
 test('unbound arrows enter, navigate within, and leave a group', t => {

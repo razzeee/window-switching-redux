@@ -57,8 +57,11 @@ previews. This does not replace physical mixed-DPI or fractional-scaling checks.
 Accessible focus on a collapsed grouped preview selects its app group and
 confirmation activates that group's newest window without entering the group.
 Focus requests on target icons and titles return to their owning navigation target.
-Chevron focus returns to its app group when collapsed, or the current window target
-when entered; focus alone does not change scope. The suite also verifies that
+Visible chevrons retain accessibility focus; Return, keypad Enter, ISO Enter, or
+Space operates the focused chevron without activating a window. Scope changes
+restore focus to the selected target, and holding the confirmation key does not
+activate that target. Hidden chevrons cannot retain focus. Focus alone does not
+change scope. The suite also verifies that
 minimized-window exit previews use the final window rectangle during unminimization.
 Node regressions check closing-dialog geometry while its compositor lookup is null,
 stable gallery rectangles despite source animation transforms, and unchanged-buffer
@@ -72,6 +75,14 @@ the Node tests. Monitor cancellation is exercised by injecting the Shell's
 monitor-change signal, not by physical hotplug. Nested-dialog identity and
 stacking are tested with controller fixtures. Physical multi-monitor interaction,
 nested-dialog presentation, and Orca still need manual testing.
+
+Window title changes update every representation's label and accessible name
+without changing selection or interrupting preview animations. Node regressions
+cover subscription cleanup and title remeasurement during transitions. The Shell
+suite emits `notify::title` on a real `Meta.Window` and checks duplicate St/ATK names
+and active label transition endpoints. This signal fixture does not simulate a
+client-originated title change. ISO Enter uses a captured-event fixture because
+the headless keymap cannot inject it; other confirmation keys use virtual input.
 
 ## Install
 
@@ -106,7 +117,8 @@ stock GNOME Shell app switcher, not another extension's overwritten handler.
 | Up or up-chevron | Leave the group and return to the full composition |
 | Move the pointer over a target | Select it without activating a window |
 | Click/tap a target | Select and activate it |
-| Release the switching modifier, Return, or Space | Activate the selected target |
+| Release the switching modifier | Activate the selected target |
+| Return, keypad Enter, ISO Enter, or Space | Operate the focused chevron, otherwise activate the selected target |
 | Escape | Cancel switching |
 
 Without a modifier in the configured switching shortcut, the switcher stays

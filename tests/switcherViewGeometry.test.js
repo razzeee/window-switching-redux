@@ -30,12 +30,20 @@ class Actor {
     set_position(x, y) { Object.assign(this, {x, y}); if (this.bufferRect) this.bufferRect = {...this.bufferRect, x, y}; }
     set_size(width, height) { Object.assign(this, {width, height}); if (this.bufferRect) this.bufferRect = {...this.bufferRect, width, height}; }
     add_child(child) { this.children.push(child); child.parent = this; }
+    set_child(child) { this.add_child(child); }
     get_children() { return this.children; }
     contains(actor) { return actor === this || this.children.some(child => child.contains(actor)); }
     add_effect() {}
     set_child_below_sibling() {}
     remove_all_transitions() { this.transition = null; }
     remove_transition() { this.transition = null; }
+    get_transition(name) {
+        const property = name.replaceAll('-', '_');
+        const transition = this.transition;
+        return transition && Object.hasOwn(transition, property)
+            ? {set_to(value) { transition[property] = value; }}
+            : null;
+    }
     finishTransition() {
         const transition = this.transition;
         this.transition = null;
@@ -84,7 +92,8 @@ function fixture({entered = false, animations = false, themeScale = 1} = {}) {
     const dependencies = {
         ...layout,
         Actor,
-        Atk: {StateType: {EXPANDED: 'expanded'}},
+        Atk: {Role: {MENU_ITEM: 'menu-item'}, StateType: {EXPANDED: 'expanded'}},
+        Pango: {EllipsizeMode: {END: 'end'}},
         global: {stage, compositor: {get_laters: () => laters}},
         Meta: {LaterType: {BEFORE_REDRAW: 'before-redraw'}},
         St: {Settings: {get: () => ({enable_animations: animations})}, Widget: Actor, Bin: Actor, Icon: Actor, Button: class extends Actor {}},
@@ -94,20 +103,31 @@ function fixture({entered = false, animations = false, themeScale = 1} = {}) {
         TRANSITION_TIME: 180,
         EXIT_TIME: 180,
     };
-    const functions = ['sourceGeometry', 'previewGeometry', 'previewProperties', 'recordBounds', 'destinationForSurface', 'visitActorTree']
+    dependencies.St.Label = class extends Actor {
+        constructor(properties) { super(properties); this.clutter_text = {}; }
+        vfunc_get_preferred_width() { return [0, this.text.length * 10 * theme.scale_factor]; }
+        vfunc_get_preferred_height() { return [0, theme.fontHeight * theme.scale_factor]; }
+    };
+    const functions = ['targetName', 'actorGeometry', 'transformedActorState', 'sourceGeometry', 'previewGeometry',
+        'previewProperties', 'recordBounds', 'destinationForSurface', 'visitActorTree']
         .map(name => source.match(new RegExp(`function ${name}\\([^]*?\\n}`))[0]).join('\n');
     const methods = ['_createClones', '_queueGeometryRefresh', '_disconnectSourceGeometry', '_refreshGeometry',
         '_applyComposition', '_setActorProperties', '_rebasePreview', '_setHiddenPreviewProperties', 'beginExit', '_clearActors',
         'build', '_disconnectKeyFocus', '_disconnectTheme', 'destroy', '_measureTitleHeights', '_positionLabel', '_positionDirectIcon', '_positionGroupChrome',
-        '_exitPreviewIndex', '_createUnavailableTarget', '_createIcon', 'enterGroup', 'leaveGroup', '_setLateFadeProperties']
+        '_exitPreviewIndex', '_createUnavailableTarget', '_createIcon', 'enterGroup', 'leaveGroup', '_setLateFadeProperties',
+        '_createWindowTarget', '_queueTitleRefresh', '_disconnectWindowTitles', 'setTargets']
         .map(name => source.match(new RegExp(`    ${name}\\([^]*?\\n    }`))[0]).join('\n');
     const View = new Function(...Object.keys(dependencies), `${functions}\nreturn class extends Actor {${methods}};`)(...Object.values(dependencies));
     const parent = new Actor({x: 100, y: 100, width: 800, height: 600});
     const dialog = new Actor({x: 300, y: 200, width: 200, height: 100});
     dialog.parent = parent;
-    const application = {};
+    const application = {create_icon_texture: () => new Actor()};
+    const window = Object.assign(new Actor(), {
+        title: 'Old', get_title() { return this.title; },
+        get_compositor_private: () => parent, get_buffer_rect: () => parent.bufferRect,
+    });
     const record = {kind: 'direct-window', application,
-        window: {get_compositor_private: () => parent, get_buffer_rect: () => parent.bufferRect},
+        window,
         auxiliarySurfaces: [{get_compositor_private: () => dialog.parent === null ? null : dialog, get_buffer_rect: () => dialog.bufferRect}]};
     for (const actor of [parent, dialog]) {
         actor.bufferRect = {x: actor.x, y: actor.y, width: actor.width, height: actor.height};
@@ -128,10 +148,22 @@ function fixture({entered = false, animations = false, themeScale = 1} = {}) {
     });
     const view = Object.assign(new View(), {
         _themeContext: theme, _themeScale: themeScale, _themeSignalId: 0,
+        _windowTitleSignals: new Map(),
+        _pendingTitleLabels: new Set(), _titleLaterId: 0,
         _targets: targets, _targetActors: targetActors, _cloneEntries: [], _sourceGeometrySignals: new Map(), _geometryLaterId: 0,
         _selectedIndex: entered ? 2 : 0, _enteredApplication: entered ? application : null, _entranceTargetIndex: -1,
         _exitTargetIndex: null, _clickActions: [], _chromeActors: [], _workArea: {x: 0, y: 0, width: 1920, height: 1080},
-        _build() { this._refreshGeometry(); },
+        _connectActivation(actor) { actor._clickGesture = {set_enabled() {}}; },
+        _build() {
+            this._backdropActor = new Actor();
+            this._targets.forEach((target, index) => {
+                if (target.kind !== 'app-group') {
+                    this._targetActors[index]?.destroy();
+                    this._createWindowTarget(target, index);
+                }
+            });
+            this._refreshGeometry();
+        },
     });
     for (const actor of targetActors)
         view.add_child(actor);
@@ -156,6 +188,144 @@ function presented(entry) {
 }
 
 function near(actual, expected) { assert.ok(Math.abs(actual - expected) < 1e-8, `${actual} != ${expected}`); }
+
+test('title changes update direct and grouped window names and remeasure hidden labels without rebuilding', () => {
+    const {view, record, pending, flush} = fixture({entered: true});
+    const actors = [view._targetActors[0], view._targetActors[2]];
+    actors[1]._selectionLabel.visible = true;
+    const clones = view._cloneEntries.map(entry => entry.clone);
+    for (const actor of actors) {
+        assert.equal(actor._selectionLabel.text, 'Old');
+        assert.equal(actor._selectionLabel.width, 30);
+    }
+    for (const title of ['Intermediate', 'Updated title']) {
+        record.window.title = title;
+        record.window.emit('notify::title');
+    }
+    for (const actor of actors) {
+        assert.equal(actor._selectionLabel.text, 'Updated title');
+        assert.equal(actor.accessible_name, 'Updated title');
+        assert.equal(actor._selectionLabel.visible, actor === actors[1]);
+    }
+    assert.equal(record.window.signals.size, 1, 'duplicate targets share a title subscription');
+    assert.equal(pending.size, 1);
+    flush();
+    for (const actor of actors) {
+        assert.equal(actor._selectionLabel.width, 130);
+        near(actor._selectionLabel.x, (actor.width - 130 * actor._selectionLabel.scale_x) / 2);
+    }
+    assert.deepEqual(view._cloneEntries.map(entry => entry.clone), clones);
+    assert.equal(view._selectedIndex, 2);
+    view.destroy();
+});
+
+for (const phase of ['enter', 'return', 'entrance']) {
+    test(`title notification preserves active composition and label transitions during ${phase}`, () => {
+        const {view, record, application, flush} = fixture({entered: true, animations: true});
+        view.leaveGroup();
+        if (phase === 'enter')
+            view.enterGroup(application);
+        else if (phase === 'entrance')
+            view._applyComposition(true, 220, null, true);
+        const labels = [view._targetActors[0]._selectionLabel, view._targetActors[2]._selectionLabel];
+        for (const label of labels) {
+            label.opacity = 17;
+            label.transition.opacity = 255;
+        }
+        const destinations = labels.map(label => ({...label.transition}));
+        const transitions = labels.map(label => label.transition);
+        for (const label of labels) {
+            label.scale_x = 0.75;
+            label.y = -99;
+        }
+        const others = [...view._cloneEntries.map(entry => entry.clone),
+            ...view._chromeActors.flatMap(actor => [actor, ...actor.get_children()])]
+            .filter(actor => !labels.includes(actor));
+        const states = others.map(actor => ({actor, transition: actor.transition, properties: {...actor.transition},
+            x: actor.x, width: actor.width, opacity: actor.opacity}));
+        const full = view._fullLayout;
+        record.window.title = 'Updated title';
+        record.window.emit('notify::title');
+        flush();
+        assert.equal(view._fullLayout, full, 'title measurement must not recalculate composition');
+        for (const state of states) {
+            assert.equal(state.actor.transition, state.transition);
+            assert.deepEqual({...state.actor.transition}, state.properties);
+            assert.equal(state.actor.x, state.x);
+            assert.equal(state.actor.width, state.width);
+            assert.equal(state.actor.opacity, state.opacity);
+        }
+        labels.forEach((label, index) => {
+            const destination = destinations[index];
+            assert.equal(label.transition, transitions[index], 'keep the existing timeline and completion callback');
+            assert.equal(label.opacity, 17, 'do not force selected title opacity');
+            assert.equal(label.scale_x, 0.75, 'do not settle the presented scale');
+            assert.equal(label.y, -99, 'do not settle the presented vertical position');
+            assert.equal(label.transition.opacity, 255);
+            for (const property of ['y', 'scale_x', 'scale_y', 'duration', 'mode', 'onComplete'])
+                assert.equal(label.transition[property], destination[property]);
+            const previewWidth = 2 * destination.x + destination.width * destination.scale_x;
+            const width = Math.min(130, previewWidth / destination.scale_x);
+            near(label.transition.width, width);
+            near(label.transition.x, (previewWidth - width * destination.scale_x) / 2);
+            assert.equal(label.width, 30, 'retarget rather than snap the animated width');
+            label.finishTransition();
+            near(label.width, width);
+            near(label.x, (previewWidth - width * destination.scale_x) / 2);
+        });
+        view.destroy();
+    });
+}
+
+test('target rebuild replaces title subscriptions and cancels pending title measurement', () => {
+    const {view, record, pending, flush} = fixture();
+    const obsolete = view._targetActors[0];
+    record.window.title = 'Before rebuild';
+    record.window.emit('notify::title');
+    assert.equal(pending.size, 1);
+    view.setTargets([record]);
+    assert.equal(pending.size, 0);
+    assert.equal(record.window.signals.size, 1);
+    const replacement = view._targetActors[0];
+    assert.notEqual(replacement, obsolete);
+    assert.equal(replacement._selectionLabel.text, 'Before rebuild');
+    record.window.title = 'After rebuild';
+    record.window.emit('notify::title');
+    assert.equal(replacement._selectionLabel.text, 'After rebuild');
+    assert.equal(replacement.accessible_name, 'After rebuild');
+    assert.equal(obsolete._selectionLabel.text, 'Before rebuild');
+    flush();
+    view.setTargets([]);
+    assert.equal(record.window.signals.size, 0);
+    record.window.emit('notify::title');
+    assert.equal(pending.size, 0);
+    view.destroy();
+});
+
+for (const exit of ['destroy', 'cancel', 'activate']) {
+    test(`title changes cannot revive a closing view, exit=${exit}`, () => {
+        const {view, record, pending, flush} = fixture({entered: true, animations: true});
+        record.window.title = 'Closing';
+        record.window.emit('notify::title');
+        assert.equal(pending.size, 1);
+        if (exit === 'activate')
+            view._exitTargetIndex = 2;
+        if (exit === 'destroy')
+            view.destroy();
+        else
+            view.beginExit(() => {});
+        assert.equal(pending.size, 0);
+        assert.equal(record.window.signals.size, 0);
+        assert.equal(view._pendingTitleLabels.size, 0);
+        assert.equal(view._titleLaterId, 0);
+        view._refreshGeometry = () => assert.fail('title refresh after exit or destruction');
+        record.window.emit('notify::title');
+        flush();
+        assert.equal(pending.size, 0);
+        if (exit !== 'destroy')
+            view.destroy();
+    });
+}
 
 test('closing dialog retains its own destination while compositor lookup is null and clone survives', () => {
     const {view, dialog} = fixture();

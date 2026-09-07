@@ -52,6 +52,7 @@ result and relevant journal excerpt for every failure.
 | Multi-window group icon | The app icon and chevron are centered beneath the complete preview cluster | Not run |
 | Enter group by key/chevron | Only group windows remain and form a balanced gallery | Not run |
 | Accessible selection and scope | Selected target has key focus; out-of-scope targets are hidden/unfocusable after fading; inactive chevrons are hidden | Not run |
+| Accessible chevron focus and held confirmation | Focus alone preserves scope; Enter/Space operates the visible chevron once; holding the key does not activate a window | Not run |
 | Orca navigation and confirmation | Names, selected target and group context are announced; confirmation activates the announced destination | Not run |
 | Entered group window title | The selected title fades in near its destination instead of flying from outside the gallery | Not run |
 | Leave group by key/chevron | Full frozen composition returns and the selected group title fades in near its destination | Not run |
@@ -64,6 +65,7 @@ result and relevant journal excerpt for every failure.
 | Close final entered window | Full composition returns without stale actors or chevrons | Not run |
 | Animations disabled | Enter, leave, and removal apply synchronously | Not run |
 | Long selected title | Pill is centered, natural-width, ellipsized, and preview-constrained | Not run |
+| Client changes a title while open or animating | Every duplicate label and accessible name updates without changing selection or interrupting animations | Not run |
 | Long title after repeated enter/leave and interrupted transitions | Title grows with the preview instead of retaining its previous width | Not run |
 | Rebuild or disable while pointer is over a grouped preview | No cross-actor hover callbacks or destroyed-actor errors; rebuild does not steal selection | Not run |
 | Window preview corners | Live previews remain clipped to the selection outline's 12px radius during every transition | Not run |
@@ -91,8 +93,12 @@ These checks complement, rather than complete, the physical-desktop matrix:
   and the activation destination for both Enter and modifier release. This does
   not test the AT-SPI bridge or screen-reader announcements.
 - ATK focus on icon bins, icons, and title text normalizes to the owning target
-  before confirmation. Chevron focus returns to its collapsed group or current
-  entered window without changing scope.
+  before confirmation. Visible chevrons retain focus and confirmation operates
+  them without activating a window. Scope changes restore target focus; hidden
+  chevron focus requests normalize to the selected target.
+- Real held Return/Space input produces autorepeat events without committing
+  after chevron activation. Return, keypad Enter, and Space use virtual input;
+  ISO Enter uses a captured-event fixture because the headless keymap lacks it.
 - Three real minimize/activate cycles verify that the exit preview destination
   matches the restored window's buffer rectangle, not its unminimize transform.
 - ATK focus on a collapsed grouped preview selects and focuses its app group
@@ -126,3 +132,7 @@ These checks complement, rather than complete, the physical-desktop matrix:
   after group entry and remapping on return, including backing resize and an
   interrupted return. Hidden backing resize does not remap the preview. These checks
   do not measure client suspension, power use, or physical animation appearance.
+- A real `Meta.Window` title-signal fixture updates duplicate St labels and local
+  ATK names, retargets active label animation endpoints, and preserves preview
+  animations. It emits `notify::title` rather than renaming a client window.
+  Node regressions additionally verify subscription and pending-refresh cleanup.

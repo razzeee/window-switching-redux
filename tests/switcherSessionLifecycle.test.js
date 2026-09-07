@@ -40,6 +40,7 @@ export class SwitcherView {
     setTargets(targets) { this.targets = targets; this.calls.push(['targets', targets]); }
     enterGroup(app) { this.calls.push(['enter', app]); }
     leaveGroup() { this.calls.push(['leave']); }
+    activateFocusedChevron() { return false; }
     setExitTarget(index) { this.calls.push(['exit', index]); }
     destroy() { this.destroyCount++; this.parent?.remove_child(this); }
 }
@@ -66,9 +67,9 @@ export function popModal(grab) {
 export function activateWindow(...args) { state.calls.push('activate'); state.activations.push(args); }
 `);
 const {state, Signals, uiGroup, layoutManager, elapse} = await import(fakeURL);
-const keys = ['Escape', 'Return', 'KP_Enter', 'space', 'Right', 'Left', 'Down', 'Up'];
+const keys = ['Escape', 'Return', 'KP_Enter', 'ISO_Enter', 'space', 'Right', 'Left', 'Down', 'Up'];
 const modules = new Map([
-    ['gi://Clutter', `export default ${JSON.stringify({EVENT_STOP: true, EventFlags: {FLAG_SYNTHETIC: 1},
+    ['gi://Clutter', `export default ${JSON.stringify({EVENT_STOP: true, EventFlags: {FLAG_SYNTHETIC: 1, FLAG_REPEATED: 4},
         ...Object.fromEntries(keys.map(key => [`KEY_${key}`, key]))})}`],
     ['gi://Meta', 'export default {KeyBindingAction: {SWITCH_APPLICATIONS: 1, SWITCH_APPLICATIONS_BACKWARD: 2}}'],
     ['gi://GObject', 'export default {registerClass: klass => klass}'],
@@ -107,7 +108,7 @@ function start(t, modifierMask = 0, modifiers = modifierMask) {
     session.start();
     return {session, view: state.view, windows, pointer, finished};
 }
-const event = key => ({get_key_symbol: () => key, get_key_code: () => 42, get_state: () => 0, get_time: () => 700});
+const event = key => ({get_key_symbol: () => key, get_key_code: () => 42, get_state: () => 0, get_flags: () => 0, get_time: () => 700});
 const press = (session, key) => assert.equal(session.vfunc_key_press_event(event(key)), true);
 const release = session => assert.equal(session.vfunc_key_release_event(event('Right')), true);
 function cleaned({session, windows}) {
@@ -179,7 +180,7 @@ test('initial target receives focus after the modal grab', t => {
     assert.equal(layoutManager.signals.size, 1);
 });
 
-for (const trigger of ['Return', 'KP_Enter', 'space', 'click/tap', 'Escape', 'modifier release', 'fast release']) {
+for (const trigger of ['Return', 'KP_Enter', 'ISO_Enter', 'space', 'click/tap', 'Escape', 'modifier release', 'fast release']) {
     test(`${trigger} finishes once and releases input before handing off the view`, t => {
         const held = trigger.includes('release');
         const fixture = start(t, held ? 8 : 0, trigger === 'fast release' ? 0 : held ? 8 : 0);
@@ -191,6 +192,7 @@ for (const trigger of ['Return', 'KP_Enter', 'space', 'click/tap', 'Escape', 'mo
             release(session);
         } else if (trigger === 'click/tap') view.activate(1, 700);
         else if (trigger !== 'fast release') press(session, trigger);
+        assert.deepEqual(finished, [[session, view]], 'the requested trigger finishes before any subsequent input');
         press(session, 'Return');
         release(session);
         view.activate(1, 800);
