@@ -9,8 +9,8 @@ The switcher appears only on the monitor containing the focused window when
 switching starts, including when entering a group. If there is no focused
 window with a monitor, it uses the pointer's monitor. Windows from other
 monitors remain selectable; their desktops are not dimmed by the switcher.
-Changing the monitor configuration cancels any open switcher or exit animation
-immediately. Invoke switching again to use the new layout.
+Changing the monitor configuration or work area cancels any open switcher or
+exit animation immediately. Invoke switching again to use the new layout.
 
 Public distribution is the goal, but this is not an EGO-ready release. The
 source is AI-generated. Do not upload it to extensions.gnome.org unless you
@@ -61,6 +61,9 @@ a passing run does not establish that every native-library diagnostic is benign.
 Live theme-scale and font changes are tested in full and entered-group layouts,
 including 200% St icon/control allocation and title remeasurement without rebuilding
 previews. This does not replace physical mixed-DPI or fractional-scaling checks.
+Pixel checks exercise the rounded-preview effect with opaque and translucent
+content at full and half opacity, including clipped corners and antialiased edges.
+These use controlled Clutter content, not screenshots of translucent client windows.
 Accessible focus on a collapsed grouped preview selects its app group and
 confirmation activates that group's newest window without entering the group.
 Focus requests on target icons and titles return to their owning navigation target.

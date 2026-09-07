@@ -4,8 +4,10 @@
 
 import Atk from 'gi://Atk';
 import Clutter from 'gi://Clutter';
+import Cogl from 'gi://Cogl';
 import GLib from 'gi://GLib';
 import Pango from 'gi://Pango';
+import Shell from 'gi://Shell';
 import St from 'gi://St';
 
 import {ExtensionState} from 'resource:///org/gnome/shell/misc/extensionUtils.js';
@@ -326,6 +328,75 @@ function assertSelection(view, index, message, selectionActor = view._targetActo
     visit(view);
     assert(styled.length === 1 && styled[0] === selectionActor,
         `${message}: exactly one selected-style actor at index ${index}`);
+}
+
+async function testRoundedPixels(view) {
+    const Effect = view._cloneEntries[0].clone.get_effects()[0].constructor;
+    const background = new Clutter.Actor({
+        x: 100, y: 100, width: 160, height: 160,
+        background_color: new Cogl.Color({red: 0, green: 0, blue: 255, alpha: 255}),
+    });
+    const preview = new Clutter.Actor({x: 20, y: 20, width: 100, height: 100});
+    const source = new Clutter.Actor({width: 100, height: 100});
+    preview.add_child(source);
+    preview.add_effect(new Effect(12));
+    background.add_child(preview);
+    Main.uiGroup.add_child(background);
+    // Shell 50 shell-screenshot.c captures stage pixels without the cursor.
+    const pixel = async (x, y) => {
+        const screenshot = new Shell.Screenshot();
+        const result = await new Promise(resolve => screenshot.pick_color(x, y, (_object, result) => resolve(result)));
+        const [ok, color] = screenshot.pick_color_finish(result);
+        assert(ok, 'Pixel capture succeeds');
+        return [color.red, color.green, color.blue];
+    };
+    try {
+        for (const [alpha, opacity] of [[255, 255], [128, 255], [255, 128], [128, 128]]) {
+            source.background_color = new Cogl.Color({red: 255, green: 0, blue: 0, alpha});
+            preview.opacity = opacity;
+            await new Promise(resolve => {
+                const signal = global.stage.connect('after-paint', () => {
+                    global.stage.disconnect(signal);
+                    resolve();
+                });
+                global.stage.queue_redraw();
+            });
+            const center = await pixel(170, 170);
+            const expectedRed = alpha * opacity / 255;
+            assert(Math.abs(center[0] - expectedRed) <= 2 && center[1] === 0 && Math.abs(center[2] - (255 - expectedRed)) <= 2,
+                `Premultiplied center alpha=${alpha} opacity=${opacity}: expected red ${expectedRed}, got ${center}`);
+            const corner = await pixel(120, 120);
+            assert(corner[0] === 0 && corner[2] === 255, `Clipped corner preserves background: ${corner}`);
+            // A partially covered red edge over blue must conserve red + blue.
+            // This catches coverage being multiplied into RGB a second time by blending.
+            const radius = 12 * St.ThemeContext.get_for_stage(global.stage).scale_factor;
+            const edgeX = Math.round(radius * (1 - 1 / Math.sqrt(2)));
+            let partial = false;
+            for (let y = edgeX - 2; y <= edgeX + 2; y++) {
+                const edge = await pixel(120 + edgeX, 120 + y);
+                if (edge[2] > 255 - expectedRed + 4 && edge[2] < 251) {
+                    partial = true;
+                    assert(Math.abs(edge[0] + edge[2] - 255) <= 2 && edge[1] === 0,
+                        `Rounded edge alpha=${alpha} opacity=${opacity} preserves coverage: ${edge}`);
+                }
+            }
+            assert(partial, 'Fixture samples a partially covered rounded edge');
+            console.log(`PASS: rounded pixels alpha=${alpha} opacity=${opacity}, center=${center}, clipped corner and antialiased edge`);
+        }
+        const pipeline = Cogl.Pipeline.new(global.stage.context.get_backend().get_cogl_context());
+        let rejected = false;
+        try {
+            pipeline.set_blend('RGB = ADD (SRC_COLOR * (SRC_COLOR[A]), DST_COLOR * (1-SRC_COLOR[A]))');
+        } catch (error) {
+            rejected = error.message.includes('Alpha channel');
+        }
+        assert(rejected, 'Cogl rejects Shell 50 GLSLEffect RGB-only blend statement without changing the default');
+        assert(pipeline.set_blend('RGBA = ADD (SRC_COLOR, DST_COLOR * (1-SRC_COLOR[A]))'),
+            'Cogl accepts explicit premultiplied source-over on an owned pipeline');
+        console.log('PASS: real Cogl rejects upstream RGB-only blend and accepts premultiplied RGBA on an owned pipeline');
+    } finally {
+        background.destroy();
+    }
 }
 
 async function testPreviewMapping(view, application) {
@@ -760,6 +831,7 @@ export async function run() {
         assert(view._cloneEntries.some(entry => entry.source === startingWindow.get_compositor_private()),
             'Preview must clone the real helper window');
         assertWorkArea(view, workArea);
+        await testRoundedPixels(view);
         await testInitialLabels(view);
         await testTitleNotification(view);
         await testLabel(view, childIndex);
