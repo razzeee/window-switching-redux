@@ -51,6 +51,13 @@ transfer and activation, clicks on protruding icons and titles, live preview
 resizing, hidden controls, and single-monitor placement. The runner isolates the session
 bus and runtime directory; the Shell test tool isolates configuration and the
 extension installation.
+System-modal tests interrupt both active sessions and detached commit/cancel
+animations. Disable tests invoke and activate windows with the real stock
+forward/backward switcher before re-enabling the extension. Selected-window
+closure is also tested inside an entered group with surviving windows.
+The runner rejects JavaScript exceptions and GJS critical diagnostics even if
+the suite reports completion. Other warnings remain visible for log review;
+a passing run does not establish that every native-library diagnostic is benign.
 Live theme-scale and font changes are tested in full and entered-group layouts,
 including 200% St icon/control allocation and title remeasurement without rebuilding
 previews. This does not replace physical mixed-DPI or fractional-scaling checks.

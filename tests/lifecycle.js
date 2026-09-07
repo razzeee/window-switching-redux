@@ -7,6 +7,7 @@ import Clutter from 'gi://Clutter';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 
+import * as AltTab from 'resource:///org/gnome/shell/ui/altTab.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as ModalDialog from 'resource:///org/gnome/shell/ui/modalDialog.js';
 import * as Scripting from 'resource:///org/gnome/shell/ui/scripting.js';
@@ -455,6 +456,50 @@ export async function testLifecycle(extension) {
             assert(extension.stateObj._controller === null && oldController._session === null && oldController._exitView === null,
                 'Disable clears extension and controller references');
             assert(destroyed && Main.modalCount === modalCount, 'Disable destroys presentation and restores modal count');
+            const savedBackward = bindings.get_user_value('switch-applications-backward');
+            try {
+                // Use a distinct accelerator to test the backward handler, not implicit reversal of the forward binding.
+                assert(bindings.set_strv('switch-applications-backward', ['<Alt>Menu']), 'Temporary backward binding is writable');
+                await settle();
+                for (const backward of [false, true]) {
+                    const beforeStock = global.display.focus_window;
+                    await alt(true);
+                    key(backward ? Clutter.KEY_Menu : Clutter.KEY_Tab);
+                    await settle();
+                    // Shell 50.0 windowManager.js creates AppSwitcherPopup; switcherPopup.js parents it to Main.uiGroup.
+                    const popups = Main.uiGroup.get_children().filter(child => child instanceof AltTab.AppSwitcherPopup);
+                    assert(popups.length === 1, 'Disabled extension invokes exactly one real stock app switcher');
+                    const popup = popups[0];
+                    assert(extension.stateObj._controller === null && oldController._session === null && oldController._exitView === null,
+                        'Stock shortcut does not revive the disabled controller');
+                    assert(popup._haveModal && popup.mapped && Main.modalCount === modalCount + 1, 'Stock popup owns the only modal');
+                    assert(popup._selectedIndex === (backward ? popup._items.length - 1 : Math.min(1, popup._items.length - 1)),
+                        'Restored stock binding chooses its documented initial app');
+                    // The helper pool is one app. Select its second window so activation cannot pass as a no-op.
+                    assert(popup._items[popup._selectedIndex].cachedWindows.length > 1, 'Stock fixture has multiple helper windows');
+                    key(Clutter.KEY_Down);
+                    key(Clutter.get_default_text_direction() === Clutter.TextDirection.RTL ? Clutter.KEY_Left : Clutter.KEY_Right);
+                    await settle();
+                    assert(popup._currentWindow === 1, 'Real stock keys select the second window thumbnail');
+                    const stockWindow = popup._items[popup._selectedIndex].cachedWindows[popup._currentWindow];
+                    assert(stockWindow !== beforeStock, 'Stock activation destination differs from the previously focused window');
+                    let stockDestroyed = false;
+                    popup.connect('destroy', () => { stockDestroyed = true; });
+                    await alt(false);
+                    assert(stockDestroyed && Main.modalCount === modalCount, 'Stock modifier release destroys popup and restores modal count');
+                    assert(global.display.focus_window === stockWindow, 'Stock modifier release activates its selected window while disabled');
+                    assert(extension.stateObj._controller === null, 'Extension remains disabled through stock activation');
+                }
+            } finally {
+                for (const popup of Main.uiGroup.get_children().filter(child => child instanceof AltTab.AppSwitcherPopup))
+                    popup.destroy();
+                if (altHeld)
+                    await alt(false);
+                if (savedBackward === null)
+                    bindings.reset('switch-applications-backward');
+                else
+                    bindings.set_value('switch-applications-backward', savedBackward);
+            }
             extension.stateObj.enable();
             await settle();
             await open();
@@ -465,34 +510,81 @@ export async function testLifecycle(extension) {
                 await settle();
             }
         }
-        console.log('PASS: disable during modal and animated exit, re-enable restores real binding');
+        console.log('PASS: disable during modal/exit restores real forward/backward stock switching and activation before re-enable');
 
-        const interrupted = noModifier();
-        await settle();
-        const interruptedActors = new Set([interrupted, interrupted._view, ...interrupted._view._targetActors]);
-        let interruptedViewDestroyed = false;
-        interrupted._view.connect('destroy', () => { interruptedViewDestroyed = true; });
-        // GNOME Shell 50.0 js/ui/modalDialog.js: open() pushes modal and emits system-modal-opened synchronously.
-        let dialog = new ModalDialog.ModalDialog({destroyOnClose: false});
-        dialog.addButton({label: 'Close', action: () => dialog.close()});
-        try {
-            assert(dialog.open(), 'Stock system modal opens');
-            assert(controller()._session === null && controller()._exitView === null,
-                'Stock system modal synchronously cancels controller without an exit view');
-            assert(interruptedViewDestroyed && interrupted._view === null && interrupted._windowSignals.size === 0,
-                'System-modal interruption destroys view and disconnects window signals');
-            assert(Main.modalCount === modalCount + 1, 'Only stock dialog modal remains after interruption');
-            assert(dialog.contains(global.stage.get_key_focus()), 'Stock dialog owns key focus after interruption');
+        for (const phase of ['active', 'commit', 'cancel']) {
+            const interrupted = noModifier();
             await settle();
-        } finally {
-            dialog.close();
-            await settle();
-            dialog.destroy();
-            dialog = null;
+            const interruptedView = interrupted._view;
+            const interruptedActors = new Set([interrupted, interruptedView, ...interruptedView.get_children()]);
+            const remainingActors = new Set(interruptedActors);
+            for (const actor of interruptedActors)
+                actor.connect('destroy', () => remainingActors.delete(actor));
+            // GNOME Shell 50.0 modalDialog.js: open() pushes modal and emits system-modal-opened synchronously.
+            let dialog = new ModalDialog.ModalDialog({destroyOnClose: false});
+            dialog.addButton({label: 'Close', action: () => dialog.close()});
+            try {
+                if (phase !== 'active') {
+                    key(phase === 'commit' ? Clutter.KEY_Return : Clutter.KEY_Escape);
+                    const detached = await waitForExit();
+                    assert(detached === interruptedView && detached.get_parent() === Main.uiGroup,
+                        `${phase}: test interrupts the original view detached from its session`);
+                    assert((detached._exitTargetIndex !== null) === (phase === 'commit'), `${phase}: exit has the expected activation mode`);
+                    assert(remainingActors.has(detached) && Main.modalCount === modalCount, `${phase}: exit is alive without a modal grab`);
+                }
+                assert(dialog.open(), `${phase}: stock system modal opens`);
+                assert(controller()._session === null && controller()._exitView === null,
+                    `${phase}: system modal synchronously clears session and detached exit view`);
+                assert(remainingActors.size === 0, `${phase}: session, view, targets and preview wrappers are destroyed before open returns`);
+                assert(interrupted._view === null && interrupted._windowSignals.size === 0,
+                    `${phase}: system-modal interruption releases session references and window signals`);
+                assert(Main.modalCount === modalCount + 1, `${phase}: only stock dialog modal remains`);
+                assert(dialog.contains(global.stage.get_key_focus()), `${phase}: stock dialog owns key focus`);
+                await settle();
+                assert(controller()._exitView === null && dialog.contains(global.stage.get_key_focus()),
+                    `${phase}: old exit deadline cannot disturb the system modal`);
+            } finally {
+                dialog.close();
+                await settle();
+                dialog.destroy();
+                dialog = null;
+            }
+            assertClosed(`${phase}: stock system modal closed`);
+            assert(!interruptedActors.has(global.stage.get_key_focus()), `${phase}: closing dialog does not restore destroyed switcher focus`);
         }
-        assertClosed('Stock system modal closed');
-        assert(!interruptedActors.has(global.stage.get_key_focus()), 'Closing stock dialog does not restore destroyed switcher focus');
-        console.log('PASS: actual stock system modal synchronously cancels switcher and restores modal baseline after close');
+        console.log('PASS: actual system modal synchronously destroys active switcher and detached commit/cancel exits');
+
+        const groupClosing = noModifier();
+        await settle();
+        const closingGroup = groupClosing._targets.find(candidate => candidate.kind === 'app-group' && candidate.windows.length > 1);
+        assert(closingGroup !== undefined, 'Selected-closure fixture has an application group with surviving windows');
+        groupClosing._enterGroup(closingGroup.application);
+        await settle();
+        const removedWindow = selectedWindow(groupClosing);
+        const nextWindow = closingGroup.windows[1].window;
+        const groupView = groupClosing._view;
+        const removedActor = groupView._targetActors[groupClosing._selectedIndex];
+        let removedActorDestroyed = false;
+        removedActor.connect('destroy', () => { removedActorDestroyed = true; });
+        // Mutter 50.0 Meta.Window.delete() requests a real client closure and eventually emits unmanaged.
+        removedWindow.delete(global.get_current_time());
+        for (let attempt = 0; attempt < 20 && groupClosing._windowSignals.has(removedWindow); attempt++)
+            await settle();
+        assert(!groupClosing._windowSignals.has(removedWindow), 'Selected window really unmanaged and its session signal was removed');
+        await settle();
+        assert(assertOpen('Selected entered-group window closed') === groupClosing && groupClosing._view === groupView,
+            'Selected closure retains the session, view and modal grab');
+        assert(groupClosing._enteredApplication === closingGroup.application && groupView._enteredApplication === closingGroup.application,
+            'Selected closure preserves the entered scope');
+        assert(selectedWindow(groupClosing) === nextWindow && groupView._selectedIndex === groupClosing._selectedIndex,
+            'Selected closure chooses the next surviving grouped window in both session and view');
+        assert(removedActorDestroyed && !groupClosing._targets.some(candidate => candidate.window === removedWindow ||
+            candidate.kind === 'app-group' && candidate.windows.some(record => record.window === removedWindow)),
+            'Rebuild destroys the old target actor and removes every representation of the closed window');
+        key(Clutter.KEY_Escape);
+        await settle();
+        assertClosed('Cancel after selected entered-group closure');
+        console.log('PASS: real selected entered-group closure preserves scope, selects its successor and removes duplicate representations');
 
         const closing = noModifier();
         await settle();

@@ -13,6 +13,12 @@ for (const [description, status, stderr, expected] of [
     ['helper disappeared without completion or script failure marker', 0,
         'Gio.DBusError: GDBus.Error:org.freedesktop.DBus.Error.ServiceUnknown: The name org.gnome.Shell.PerfHelper was not provided by any .service files', 1],
     ['failure after completion', 0, `${complete}\nScript failed`, 1],
+    ['JavaScript exception despite completion', 0,
+        `Gjs-CRITICAL **: JS ERROR: TypeError: view is null\n_finish@file:///tmp/extensions/window-switching-redux@razzeee.github.io/switcherSession.js:301:9\n${complete}`, 1],
+    ['disposed extension actor despite completion', 0,
+        `Gjs-CRITICAL **: Object .WindowSwitchingReduxSession has been already disposed\n${complete}`, 1],
+    ['unrelated headless warning', 0,
+        `St-CRITICAL **: _st_create_shadow_pipeline_from_actor: assertion 'width > 0' failed\n${complete}`, 0],
     ['nonzero exit despite completion', 1, complete, 1],
     ['terminated process', null, '', 1],
 ]) {

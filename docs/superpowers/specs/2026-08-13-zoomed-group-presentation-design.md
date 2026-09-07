@@ -1,5 +1,10 @@
 # Zoomed App Group Presentation Design
 
+Historical design. The root `README.md` and `CONTEXT.md` define current
+interaction and navigation requirements. In particular, collapsed previews
+select or activate their app group, and the entered group's application icon
+does not activate a window. Use the up-chevron to leave the group.
+
 ## Objective
 
 Make hierarchical app-group descent spatially explicit. Entering an app group replaces the full switcher composition with a group-only balanced window gallery. The transition communicates that keyboard traversal is now scoped to that application's windows.

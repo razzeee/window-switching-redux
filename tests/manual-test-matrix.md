@@ -70,7 +70,7 @@ result and relevant journal excerpt for every failure.
 | Rebuild or disable while pointer is over a grouped preview | No cross-actor hover callbacks or destroyed-actor errors; rebuild does not steal selection | Not run |
 | Window preview corners | Live previews remain clipped to the selection outline's 12px radius during every transition | Not run |
 | Preview corners at 100%, 200%, and fractional scale | Live previews and selection outlines keep the same circular 12px radius | Not run |
-| System modal | Session closes and releases modal grab | Not run |
+| System modal while open or exiting | Session releases its grab; active presentation or detached exit animation is destroyed synchronously | Not run |
 | Lock/unlock | No stale actor or input capture remains | Not run |
 | Disable while open | UI and grab are synchronously destroyed | Not run |
 | Shell theme change | Selection remains visible | Not run |
@@ -87,6 +87,10 @@ These checks complement, rather than complete, the physical-desktop matrix:
   rebound Alt+Menu, modifier release, and explicit confirmation.
 - The actual controller/session handles Escape, system-modal interruption,
   final-window closure, rapid reopen, and disable during open/exiting states.
+- Real system modals interrupt active sessions and detached commit/cancel exits.
+  Selected entered-group window closure preserves scope and selects a survivor.
+  While disabled, both stock switching bindings open the real stock popup and
+  activate a different window before the extension is re-enabled.
 - Monitor cancellation uses an injected `monitors-changed` signal on one
   headless monitor. Focus/visibility assertions do not constitute an Orca test.
 - Local `Atk.Component.grab_focus()` on a nonselected target updates selection

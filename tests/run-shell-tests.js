@@ -29,7 +29,7 @@ process.stderr.write(result.stderr ?? '');
 const output = `${result.stdout ?? ''}\n${result.stderr ?? ''}`;
 if (result.error || result.status !== 0 ||
     !output.includes('PASS: Window Switching Redux smoke suite complete') ||
-    output.includes('Script failed')) {
+    output.includes('Script failed') || /JS ERROR:|Gjs-CRITICAL/.test(output)) {
     console.error(result.error ?? 'Shell integration tests did not complete successfully.');
     process.exitCode = 1;
 }

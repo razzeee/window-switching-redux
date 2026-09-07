@@ -318,6 +318,24 @@ test('rapid reopen destroys the old exit view before starting a fresh session', 
 });
 
 for (const phase of ['active', 'exit']) {
+    test(`system modal synchronously clears ${phase} presentation and cancels exit completion`, t => {
+        const {controller, invoke} = setup(t, [window('W')]);
+        const session = invoke();
+        const view = exitView();
+        if (phase === 'exit')
+            session.finish(view);
+        layoutManager.emit('system-modal-opened');
+        assert.equal(controller._session, null);
+        assert.equal(controller._exitView, null);
+        assert.equal(phase === 'active' ? session.destroyCount : view.destroyCount, 1);
+        assert.equal(view.completion, null);
+        layoutManager.emit('system-modal-opened');
+        assert.equal(phase === 'active' ? session.destroyCount : view.destroyCount, 1);
+        assert.notEqual(invoke(), session);
+        controller.destroy();
+        assert.equal(layoutManager.signals.size, 0);
+    });
+
     test(`monitor topology change synchronously clears ${phase} ownership and allows reopening`, t => {
         const {controller, invoke} = setup(t, [window('W')]);
         const first = invoke();
@@ -339,13 +357,14 @@ for (const phase of ['active', 'exit']) {
         const view = exitView();
         if (phase === 'exit')
             session.finish(view);
-        assert.equal(layoutManager.signals.size, 1);
+        assert.equal(layoutManager.signals.size, 2);
         controller.destroy();
         assert.equal(controller._session, null);
         assert.equal(controller._exitView, null);
         assert.equal(phase === 'active' ? session.destroyCount : view.destroyCount, 1);
         assert.equal(layoutManager.signals.size, 0);
         layoutManager.emit('monitors-changed');
+        layoutManager.emit('system-modal-opened');
         for (const name of ['switch-applications', 'switch-applications-backward'])
             wm.handlers.get(name)('display', 'window', 'event', name);
         assert.deepEqual(wm.stockCalls, [

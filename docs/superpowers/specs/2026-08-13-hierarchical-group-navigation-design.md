@@ -1,5 +1,10 @@
 # Hierarchical App Group Navigation Design
 
+Historical design. The later zoomed-group design supersedes the static
+presentation below. For current interaction and navigation requirements, use
+the root `README.md` and `CONTEXT.md`: pointer movement selects targets, and
+collapsed previews select or activate their app group, not individual windows.
+
 ## Objective
 
 Change keyboard traversal so grouped window targets remain visible but are not part of normal top-level `Tab` traversal. A user selects an app group first and deliberately descends into that group's windows.

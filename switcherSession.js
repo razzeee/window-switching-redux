@@ -44,7 +44,6 @@ class SwitcherSession extends St.Widget {
         this._grab = null;
         this._view = null;
         this._windowSignals = new Map();
-        this._systemModalSignal = 0;
         this._pointerPosition = global.get_pointer().slice(0, 2);
     }
 
@@ -64,8 +63,6 @@ class SwitcherSession extends St.Widget {
         this.add_child(this._view);
         this._view.build();
         this._connectWindowSignals();
-        this._systemModalSignal = Main.layoutManager.connect(
-            'system-modal-opened', () => this._finish(false, true));
 
         this._grab = Main.pushModal(this);
         this._view.setSelection(this._selectedIndex);
@@ -96,12 +93,9 @@ class SwitcherSession extends St.Widget {
 
     _disconnectInput() {
         if (this._grab !== null) {
-            Main.popModal(this._grab);
+            const grab = this._grab;
             this._grab = null;
-        }
-        if (this._systemModalSignal !== 0) {
-            Main.layoutManager.disconnect(this._systemModalSignal);
-            this._systemModalSignal = 0;
+            Main.popModal(grab);
         }
         for (const [window, signal] of this._windowSignals)
             window.disconnect(signal);
@@ -285,9 +279,15 @@ class SwitcherSession extends St.Widget {
         const target = this._targets[this._selectedIndex];
         const window = target === undefined ? null : this._activationWindow(target);
         this._disconnectInput();
+        if (this._onFinished === null)
+            return;
 
         if (activate && window !== null)
             Main.activateWindow(window, timestamp);
+
+        // Activation can synchronously open a system modal and cancel this session.
+        if (this._onFinished === null)
+            return;
 
         const view = this._view;
         this._view = null;
@@ -298,9 +298,6 @@ class SwitcherSession extends St.Widget {
 
         const onFinished = this._onFinished;
         this._onFinished = null;
-        this._targets = Object.freeze([]);
-        this._pointerPosition = null;
-        super.destroy();
 
         if (synchronous) {
             if (view !== null)
@@ -309,6 +306,7 @@ class SwitcherSession extends St.Widget {
         } else {
             onFinished(this, view);
         }
+        this.destroy();
     }
 
     vfunc_captured_event(event) {

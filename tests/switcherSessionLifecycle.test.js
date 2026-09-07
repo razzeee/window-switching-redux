@@ -25,6 +25,7 @@ export class Widget {
     set_size(...size) { this.size = size; }
     grab_key_focus() { state.focus = this; state.calls.push('widget-focus'); }
     destroy() {
+        state.calls.push('native-destroy');
         this.destroyCount++;
         for (const child of [...this.children]) child.destroy();
         this.parent?.remove_child(this);
@@ -64,7 +65,7 @@ export function popModal(grab) {
     if (grab !== state.grab) throw Error('Unknown grab');
     state.calls.push('pop'); state.grab = null;
 }
-export function activateWindow(...args) { state.calls.push('activate'); state.activations.push(args); }
+export function activateWindow(...args) { state.calls.push('activate'); state.activations.push(args); state.onActivate?.(); }
 `);
 const {state, Signals, uiGroup, layoutManager, elapse} = await import(fakeURL);
 const keys = ['Escape', 'Return', 'KP_Enter', 'ISO_Enter', 'space', 'Right', 'Left', 'Down', 'Up'];
@@ -87,7 +88,7 @@ let SwitcherSession;
 try { ({SwitcherSession} = await import('../switcherSession.js')); } finally { hooks.deregister(); }
 
 function start(t, modifierMask = 0, modifiers = modifierMask) {
-    Object.assign(state, {calls: [], activations: [], timers: new Map(), scheduled: 0, now: 0, grab: null, focus: null});
+    Object.assign(state, {calls: [], activations: [], timers: new Map(), scheduled: 0, now: 0, grab: null, focus: null, onActivate: null});
     const pointer = [10, 20, modifiers];
     const globals = {get_pointer: () => pointer, get_current_time: () => 900,
         stage: {width: 1920, height: 1080}, display: {get_keybinding_action: () => 0}};
@@ -111,6 +112,52 @@ function start(t, modifierMask = 0, modifiers = modifierMask) {
 const event = key => ({get_key_symbol: () => key, get_key_code: () => 42, get_state: () => 0, get_flags: () => 0, get_time: () => 700});
 const press = (session, key) => assert.equal(session.vfunc_key_press_event(event(key)), true);
 const release = session => assert.equal(session.vfunc_key_release_event(event('Right')), true);
+
+for (const synchronous of [false, true]) {
+    test(`finish uses canonical cleanup after view handoff, synchronous=${synchronous}`, t => {
+        const fixture = start(t);
+        const {session, view, windows} = fixture;
+        const application = {};
+        session._targets = buildTraversal(windows.map(window => ({window, application, auxiliarySurfaces: []})), 0);
+        session._enterGroup(application);
+        const destroy = t.mock.method(session, 'destroy');
+        let callbacks = 0;
+        session._onFinished = (finishedSession, exitView) => {
+            callbacks++;
+            assert.equal(finishedSession, session);
+            assert.equal(session.destroyCount, 0, 'handoff precedes native actor destruction');
+            assert.equal(session._grab, null);
+            assert.equal(session._view, null);
+            assert.equal(session._onFinished, null);
+            assert.equal(view.parent, null);
+            assert.equal(exitView, synchronous ? null : view);
+            if (!synchronous)
+                exitView.destroy(); // Animations-disabled completion can destroy the view inline.
+            assert.equal(view.destroyCount, 1);
+            state.calls.push('finished');
+        };
+        session._finish(!synchronous, synchronous, 700);
+        assert.equal(callbacks, 1);
+        assert.equal(destroy.mock.callCount(), 1);
+        assert.equal(session._enteredApplication, null);
+        assert.equal(session._startingWindow, null);
+        assert.deepEqual(session._targets, []);
+        assert.equal(session._pointerPosition, null);
+        assert.deepEqual(state.calls.slice(-2), ['finished', 'native-destroy']);
+        cleaned(fixture);
+    });
+}
+
+test('synchronous cancellation during activation cannot hand off a destroyed view', t => {
+    const fixture = start(t);
+    const {session, view, finished} = fixture;
+    state.onActivate = () => session.destroy();
+    session._finish(true, false, 700);
+    assert.deepEqual(finished, []);
+    assert.equal(view.destroyCount, 1);
+    cleaned(fixture);
+});
+
 function cleaned({session, windows}) {
     assert.equal(state.grab, null);
     assert.equal(state.calls.filter(call => call === 'pop').length, 1);
@@ -177,7 +224,7 @@ test('initial target receives focus after the modal grab', t => {
     assert.deepEqual(view.calls, [['build'], ['selection', 1]]);
     assert.deepEqual(session.size, [1920, 1080]);
     assert.ok(windows.every(window => window.signals.size === 1));
-    assert.equal(layoutManager.signals.size, 1);
+    assert.equal(layoutManager.signals.size, 0, 'presentation interruption belongs to the controller');
 });
 
 for (const trigger of ['Return', 'KP_Enter', 'ISO_Enter', 'space', 'click/tap', 'Escape', 'modifier release', 'fast release']) {
@@ -207,7 +254,7 @@ for (const trigger of ['Return', 'KP_Enter', 'ISO_Enter', 'space', 'click/tap', 
     });
 }
 
-for (const trigger of ['last window removed', 'system modal', 'destroy']) {
+for (const trigger of ['last window removed', 'destroy']) {
     test(`${trigger} synchronously destroys the view without activation`, t => {
         const fixture = start(t);
         const {session, view, windows, finished} = fixture;
@@ -217,8 +264,7 @@ for (const trigger of ['last window removed', 'system modal', 'destroy']) {
             assert.deepEqual(finished, []);
             assert.deepEqual(view.calls.slice(-3), [['targets', session._targets], ['leave'], ['selection', 0]]);
             windows[0].emit('unmanaged');
-        } else if (trigger === 'system modal') layoutManager.emit('system-modal-opened');
-        else session.destroy();
+        } else session.destroy();
         assert.deepEqual(finished, trigger === 'destroy' ? [] : [[session, null]]);
         assert.equal(view.destroyCount, 1);
         elapse(60_000);

@@ -33,6 +33,8 @@ export class SwitcherController {
         this._stockHandler = Main.wm._startSwitcher.bind(Main.wm);
         this._monitorsChangedId = Main.layoutManager.connect(
             'monitors-changed', () => this._clearPresentation());
+        this._systemModalId = Main.layoutManager.connect(
+            'system-modal-opened', () => this._clearPresentation());
 
         Main.wm.setCustomKeybindingHandler(
             FORWARD_BINDING, Shell.ActionMode.NORMAL, this._bindingHandler);
@@ -135,18 +137,22 @@ export class SwitcherController {
 
     _clearPresentation() {
         if (this._session !== null) {
-            this._session.destroy();
+            const session = this._session;
             this._session = null;
+            session.destroy();
         }
         if (this._exitView !== null) {
-            this._exitView.destroy();
+            const exitView = this._exitView;
             this._exitView = null;
+            exitView.destroy();
         }
     }
 
     destroy() {
         Main.layoutManager.disconnect(this._monitorsChangedId);
         this._monitorsChangedId = 0;
+        Main.layoutManager.disconnect(this._systemModalId);
+        this._systemModalId = 0;
         this._clearPresentation();
 
         Main.wm.setCustomKeybindingHandler(
