@@ -96,19 +96,56 @@ the headless keymap cannot inject it; other confirmation keys use virtual input.
 
 ## Install
 
+On GNOME Shell 50, download
+`window-switching-redux@razzeee.github.io.shell-extension.zip` from the
+[GitHub release assets](https://github.com/razzeee/window-switching-redux/releases).
+Choose the `.shell-extension.zip` asset, not GitHub's automatically generated
+source archives. From the download directory, run:
+
+```sh
+gnome-extensions install --force \
+  window-switching-redux@razzeee.github.io.shell-extension.zip
+```
+
+For a local build, install the package from `dist/` instead:
+
 ```sh
 gnome-extensions install --force \
   dist/window-switching-redux@razzeee.github.io.shell-extension.zip
+```
+
+After installing or updating, log out and back in on Wayland to load the new
+extension code, then enable it:
+
+```sh
 gnome-extensions enable window-switching-redux@razzeee.github.io
 ```
 
-Restart the Shell session after installation if the extension is not visible.
-On Wayland, log out and back in. Remove it with:
+Remove it with:
 
 ```sh
 gnome-extensions disable window-switching-redux@razzeee.github.io
 rm -rf ~/.local/share/gnome-shell/extensions/window-switching-redux@razzeee.github.io
 ```
+
+## CI And Releases
+
+The `Test and Package` GitHub Actions workflow runs `npm test` and `npm run pack`
+on pushes, pull requests, published releases, and manual runs. It checks ZIP
+integrity and uploads a `shell-extension` artifact. Download and extract that
+artifact to get the installable `.shell-extension.zip` inside.
+
+To publish a downloadable build, create a GitHub release for the desired tag
+and publish it. After tests and packaging succeed, the workflow attaches the
+installable ZIP to that release. Published prereleases work too. Pushing a tag
+alone or saving a draft release does not upload a release asset. Rerunning the
+release workflow replaces the asset with the same filename.
+
+CI runs the Node tests only, not `npm run test:shell`. The Ubuntu runner supplies
+the packaging tool, not a GNOME Shell 50 runtime. Run the Shell integration tests
+and the manual checks before publishing a build intended for wider use. This
+workflow does not submit the extension to extensions.gnome.org or remove the
+generated-code notices.
 
 ## Bindings And Conflicts
 
