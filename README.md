@@ -1,221 +1,167 @@
 # Window Switching Redux
 
-Window Switching Redux is a GNOME Shell 50 behavioral prototype that combines
-four direct recent-window targets with complete groups for applications that
-have older windows. Older windows without an associated application remain
-available as additional direct targets, before the application groups.
+A GNOME Shell 50 extension that combines recent-window switching with application
+groups. Reach your four most recent windows directly, or enter a group to choose
+from all of an application's windows.
 
-The switcher appears only on the monitor containing the focused window when
-switching starts, including when entering a group. If there is no focused
-window with a monitor, it uses the pointer's monitor. Windows from other
-monitors remain selectable; their desktops are not dimmed by the switcher.
-Changing the monitor configuration or work area cancels any open switcher or
-exit animation immediately. Invoke switching again to use the new layout.
+This is a behavioral prototype, not an EGO-ready release. The source is
+AI-generated. Do not upload it to extensions.gnome.org unless you understand the
+JavaScript and can maintain it. Before submission, the maintainer must review the
+source and manually remove the generated-code notices.
 
-Public distribution is the goal, but this is not an EGO-ready release. The
-source is AI-generated. Do not upload it to extensions.gnome.org unless you
-understand the JavaScript and can maintain it. The maintainer must review the
-source and remove its generated-code notices manually before submission.
+## How It Works
 
-## Requirements
+The switcher shows targets in this order:
 
-- GNOME Shell 50 only
-- Node.js 22.15 or later for model, layout, and stubbed Shell input tests
-- `gnome-extensions` for packaging and installation
-- `gnome-shell-test-tool` and `dbus-run-session` for isolated Shell integration tests
+1. Your four most recent windows, each selectable directly.
+2. Any older windows without an associated application, also selectable directly.
+3. Application groups for apps with at least one window outside the recent four.
 
-## Test And Package
+Each application group contains **all of that app's windows**, including any
+already shown as recent windows. Activating a group focuses its most recently
+used window. Enter the group to choose a different one.
 
-```sh
-npm test
-npm run pack
-unzip -l dist/window-switching-redux@razzeee.github.io.shell-extension.zip
-```
+Window order stays fixed while the switcher is open, except that closed windows
+are removed. Forward invocation skips the starting window so a quick switch takes
+you to the previous one. Attached dialogs share their root window's target.
 
-The package contains only `metadata.json`, `extension.js`, `stylesheet.css`,
-the root runtime modules, `LICENSE` (copyright and GPL-2.0-or-later notice),
-and `COPYING` (the full GNU GPL version 2 text). It excludes tests, plans,
-and research.
-
-Run the widget integration checks in an isolated headless Shell 50 session:
-
-```sh
-npm run test:shell
-```
-
-This builds the package and tests real window previews, label resizing and
-animation reversal, shared pointer/keyboard selection, click/touch cancellation,
-actual shortcut invocation and activation, system-modal interruption, final-window
-closure, rapid reopening, and disable/re-enable. It also checks local ATK focus
-transfer and activation, clicks on protruding icons and titles, live preview
-resizing, hidden controls, and single-monitor placement. The runner isolates the session
-bus and runtime directory; the Shell test tool isolates configuration and the
-extension installation.
-System-modal tests interrupt both active sessions and detached commit/cancel
-animations. Disable tests invoke and activate windows with the real stock
-forward/backward switcher before re-enabling the extension. Selected-window
-closure is also tested inside an entered group with surviving windows.
-The runner rejects JavaScript exceptions and GJS critical diagnostics even if
-the suite reports completion. Other warnings remain visible for log review;
-a passing run does not establish that every native-library diagnostic is benign.
-Live theme-scale and font changes are tested in full and entered-group layouts,
-including 200% St icon/control allocation and title remeasurement without rebuilding
-previews. This does not replace physical mixed-DPI or fractional-scaling checks.
-Pixel checks exercise the rounded-preview effect with opaque and translucent
-content at full and half opacity, including clipped corners and antialiased edges.
-These use controlled Clutter content, not screenshots of translucent client windows.
-Accessible focus on a collapsed grouped preview selects its app group and
-confirmation activates that group's newest window without entering the group.
-Focus requests on target icons and titles return to their owning navigation target.
-Visible chevrons retain accessibility focus; Return, keypad Enter, ISO Enter, or
-Space operates the focused chevron without activating a window. Scope changes
-restore focus to the selected target, and holding the confirmation key does not
-activate that target. Hidden chevrons cannot retain focus. Focus alone does not
-change scope. The suite also verifies that
-minimized-window exit previews use the final window rectangle during unminimization.
-Node regressions check closing-dialog geometry while its compositor lookup is null,
-stable gallery rectangles despite source animation transforms, and unchanged-buffer
-notifications preserving transitions. They also cover preview hiding with animations
-on/off and reversal during either step of a backing-resize fade. The Shell suite
-checks that out-of-scope preview wrappers and their actual `Clutter.Clone` children
-are unmapped, stay unmapped during hidden backing resize, and remap on return.
-These are mapping assertions, not measurements of client suspension or power use.
-Multi-monitor placement policy and small work-area geometry are covered by
-the Node tests. Monitor cancellation is exercised by injecting the Shell's
-monitor-change signal, not by physical hotplug. Nested-dialog identity and
-stacking are tested with controller fixtures. Physical multi-monitor interaction,
-nested-dialog presentation, and Orca still need manual testing.
-
-Window title changes update every representation's label and accessible name
-without changing selection or interrupting preview animations. Node regressions
-cover subscription cleanup and title remeasurement during transitions. The Shell
-suite emits `notify::title` on a real `Meta.Window` and checks duplicate St/ATK names
-and active label transition endpoints. This signal fixture does not simulate a
-client-originated title change. ISO Enter uses a captured-event fixture because
-the headless keymap cannot inject it; other confirmation keys use virtual input.
+The switcher follows GNOME's existing `current-workspace-only` app-switcher
+setting. It appears on the focused window's monitor, or the pointer's monitor
+when no window is focused. Windows on other monitors remain selectable without
+dimming those desktops. Monitor or work-area changes dismiss the switcher;
+invoke it again to use the new layout.
 
 ## Install
 
-On GNOME Shell 50, download
-`window-switching-redux@razzeee.github.io.shell-extension.zip` from the
-[GitHub release assets](https://github.com/razzeee/window-switching-redux/releases).
-Choose the `.shell-extension.zip` asset, not GitHub's automatically generated
-source archives. From the download directory, run:
+Requires **GNOME Shell 50** and the `gnome-extensions` command. To build from this
+checkout, you also need npm to run the packaging script.
+
+From the repository root:
 
 ```sh
-gnome-extensions install --force \
-  window-switching-redux@razzeee.github.io.shell-extension.zip
-```
-
-For a local build, install the package from `dist/` instead:
-
-```sh
+npm run pack
 gnome-extensions install --force \
   dist/window-switching-redux@razzeee.github.io.shell-extension.zip
 ```
 
-After installing or updating, log out and back in on Wayland to load the new
-extension code, then enable it:
+After installing or updating, restart your Shell session to load the extension
+code. On Wayland, log out and back in. Then enable it:
 
 ```sh
 gnome-extensions enable window-switching-redux@razzeee.github.io
 ```
 
-Remove it with:
+## Controls
 
-```sh
-gnome-extensions disable window-switching-redux@razzeee.github.io
-rm -rf ~/.local/share/gnome-shell/extensions/window-switching-redux@razzeee.github.io
-```
-
-## CI And Releases
-
-The `Test and Package` GitHub Actions workflow runs `npm test` and `npm run pack`
-on pushes, pull requests, published releases, and manual runs. It checks ZIP
-integrity and uploads a `shell-extension` artifact. Download and extract that
-artifact to get the installable `.shell-extension.zip` inside.
-
-To publish a downloadable build, create a GitHub release for the desired tag
-and publish it. After tests and packaging succeed, the workflow attaches the
-installable ZIP to that release. Published prereleases work too. Pushing a tag
-alone or saving a draft release does not upload a release asset. Rerunning the
-release workflow replaces the asset with the same filename.
-
-CI runs the Node tests only, not `npm run test:shell`. The Ubuntu runner supplies
-the packaging tool, not a GNOME Shell 50 runtime. Run the Shell integration tests
-and the manual checks before publishing a build intended for wider use. This
-workflow does not submit the extension to extensions.gnome.org or remove the
-generated-code notices.
-
-## Bindings And Conflicts
-
-The extension replaces `switch-applications` and
-`switch-applications-backward`, preserving the user's configured accelerators.
-`Alt+Esc` is unchanged. Switcher extensions are last-writer-wins because GNOME
-Shell exposes no previous-handler stack. Disabling this extension restores the
-stock GNOME Shell app switcher, not another extension's overwritten handler.
-
-## Navigation
+Use your configured GNOME application-switching shortcuts. The extension replaces
+`switch-applications` and `switch-applications-backward` without changing their
+accelerators. `Alt+Esc` is unchanged.
 
 | Input | Action |
 |---|---|
-| Switching shortcut, Left/Right | Move backward/forward within the current scope |
+| Forward / backward switching shortcut | Move to the next / previous target |
+| Left / Right | Move backward / forward within the current scope, wrapping at either end |
 | Down or down-chevron | Enter the selected application group |
-| Up or up-chevron | Leave the group and return to the full composition |
-| Move the pointer over a target | Select it without activating a window |
-| Click/tap a target | Select and activate it |
+| Up or up-chevron | Leave the group |
+| Move the pointer over a target | Select it without activating it |
+| Click or tap a target | Select and activate it |
 | Release the switching modifier | Activate the selected target |
-| Return, keypad Enter, ISO Enter, or Space | Operate the focused chevron, otherwise activate the selected target |
+| Enter or Space | Operate the focused chevron, otherwise activate the selected target |
 | Escape | Cancel switching |
 
-Without a modifier in the configured switching shortcut, the switcher stays
-open until explicit confirmation or cancellation. There is no automatic
-activation timeout. Releasing a press outside its control cancels the click or
-tap; a cancelled chevron press never activates its parent group.
+Return, keypad Enter, and ISO Enter all work as confirmation keys. Configured
+switching shortcuts take precedence over navigation keys. A shortcut without a
+modifier leaves the switcher open until you confirm or cancel; there is no timeout.
 
-Configured switching shortcuts take precedence over the navigation keys above.
-There is one selection and one highlight, shared by keyboard and pointer.
-Moving the pointer onto a target updates the selection; the next keyboard move
-continues from there. A stationary pointer does not reclaim selection when
-the switcher opens, animates, or rebuilds. Moving onto empty space keeps the
-last selection.
+Keyboard and pointer share one selection. After hovering a target, keyboard
+navigation continues from there. A stationary pointer does not steal selection
+when the switcher opens or animates, and moving onto empty space keeps the last
+selection.
 
-In the full composition, hovering or clicking any preview in a collapsed group
-selects or activates the whole group. Group activation focuses its newest
-window. Enter the group to select individual windows with either input method.
-The up-chevron leaves an entered group without selecting or activating its
-header.
+Hovering or clicking a preview in a collapsed group selects or activates the
+whole group. Enter it first to choose an individual window. Releasing a click or
+touch outside the pressed control cancels that gesture without activation.
 
-Attached dialogs, including nested dialogs, share their root window's target.
-Their preview surfaces follow the compositor's stacking order. Forward
-invocation from an attached dialog skips that root window initially.
-Preview geometry follows source resizing and attached-dialog movement without
-changing the session's target order or selection.
+### Other Switcher Extensions
 
-## Logs
+Avoid enabling multiple extensions that replace the application switcher. GNOME
+Shell has no previous-handler stack, so the last extension to register a handler
+wins. Disabling this extension restores the stock GNOME app switcher, not another
+extension's overwritten handler.
 
-Follow Shell extension logs with:
+## Development
+
+Run model, layout, and stubbed Shell-input tests with Node.js 22.15 or later:
+
+```sh
+npm test
+```
+
+For integration tests, you also need GNOME Shell 50, `gnome-shell-test-tool`,
+`dbus-run-session`, and `gnome-extensions`:
+
+```sh
+npm run test:shell
+```
+
+This command builds the package and runs an isolated headless Shell session.
+The suite covers real previews, keyboard and pointer input, group navigation,
+activation and cancellation, accessibility focus, animation interruption, and
+disable/re-enable. It rejects JavaScript exceptions and GJS critical diagnostics;
+other warnings remain visible for review.
+
+Automated checks do not establish Orca usability, physical mixed-DPI behavior,
+or monitor hotplug behavior. Some scenarios use injected signals or controlled
+content rather than real client or hardware changes. Use the
+[manual test matrix](tests/manual-test-matrix.md) for desktop validation.
+
+To build and inspect the installable ZIP:
+
+```sh
+npm run pack
+unzip -l dist/window-switching-redux@razzeee.github.io.shell-extension.zip
+```
+
+The package includes the runtime modules, metadata, stylesheet, and license files.
+Tests, plans, and research are excluded.
+
+See [CONTEXT.md](CONTEXT.md) for the switching model and terminology, and the
+[GNOME Shell 50 API research](docs/research/gnome-shell-50-switcher-apis.md)
+for implementation references.
+
+## Known Limitations
+
+- GNOME Shell 50 only. The implementation uses private Shell JavaScript APIs.
+- Every target stays visible. At high window counts or in small work areas,
+  previews and hit areas shrink; keyboard traversal remains the supported path.
+  A usable overflow policy is still needed.
+- Source windows remain visible behind their live previews.
+- Orca announcements and navigation still need manual validation, as do large
+  text, high-contrast themes, fractional scaling, and physical multi-monitor use.
+- Hardware checks for hotplug, lock/unlock, suspend/resume, nested dialogs, and
+  interrupted animations remain outstanding. Frame times and memory also need
+  profiling across repeated sessions and large window counts.
+
+## Troubleshooting
+
+If the extension does not appear after installation, restart your Shell session
+and check that you are running GNOME Shell 50. If another switcher appears,
+disable competing switcher extensions.
+
+Follow Shell logs with:
 
 ```sh
 journalctl --user -f -o cat /usr/bin/gnome-shell
 ```
 
-## Prototype Limitations
+## Remove
 
-- Runtime behavior is coupled to private GNOME Shell 50 JavaScript APIs.
-- Every target remains visible, so previews and hit areas become very small at
-  high window counts. Chrome and spacing also shrink when the work area is
-  small. Keyboard traversal remains the supported path.
-- Source windows remain visible behind live clones during the prototype.
-- Visual and interaction scenarios still require the manual matrix in
-  `tests/manual-test-matrix.md` on the target desktop.
+```sh
+gnome-extensions disable window-switching-redux@razzeee.github.io
+gnome-extensions uninstall window-switching-redux@razzeee.github.io
+```
 
-## Before Public Release
+## License
 
-- Validate screen-reader announcements, group navigation, and activation with Orca.
-- Validate actual text and control sizing with large text, fractional scaling,
-  and high-contrast themes; choose a usable overflow policy for high window counts.
-- Complete hardware checks for monitor hotplug, lock/unlock, suspend/resume,
-  nested dialogs, and interrupted animations, including animations disabled.
-- Profile frame times and memory across repeated sessions and large window counts.
-- Complete maintainer review before submission.
+GPL-2.0-or-later. See [LICENSE](LICENSE) for the copyright notice and
+[COPYING](COPYING) for the full license text.
