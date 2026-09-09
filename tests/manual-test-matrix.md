@@ -20,6 +20,7 @@ result and relevant journal excerpt for every failure.
 | Pointer on a different monitor than the focused window | Focused window's monitor wins; moving the pointer does not move the open switcher | Not run |
 | No focused window | Switcher uses the pointer's monitor | Not run |
 | Monitor disconnect, rotation, or resolution change while open/exiting | Presentation disappears synchronously without activation or stale modal capture | Not run |
+| Panel/dock reserved-space change without a monitor change while open or during commit/cancel exit | Presentation disappears synchronously with no additional activation or stale grab; reopening uses the new work area | Not run |
 | Small logical work area, including 448px height | Previews retain positive dimensions; scaled chrome fits within the monitor | Not run |
 | Cross-workspace activation | Selected window's workspace activates | Not run |
 | Minimized/sticky/unassociated windows | Each remains reachable | Not run |
@@ -93,6 +94,8 @@ These checks complement, rather than complete, the physical-desktop matrix:
   activate a different window before the extension is re-enabled.
 - Monitor cancellation uses an injected `monitors-changed` signal on one
   headless monitor. Focus/visibility assertions do not constitute an Orca test.
+- Node controller tests inject `workareas-changed` independently of monitor changes
+  and cover active/exit cancellation, repeated notifications, reopening, and disconnect cleanup.
 - Local `Atk.Component.grab_focus()` on a nonselected target updates selection
   and the activation destination for both Enter and modifier release. This does
   not test the AT-SPI bridge or screen-reader announcements.

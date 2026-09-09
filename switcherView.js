@@ -44,6 +44,8 @@ vec2 offset = abs(point - half_size) -
 float distance_to_edge = length(max(offset, vec2(0.0))) +
     min(max(offset.x, offset.y), 0.0) - clip_radius;
 float coverage = 1.0 - smoothstep(-0.5, 0.5, distance_to_edge);
+// Offscreen color is premultiplied. Cogl rejects Shell 50's RGB-only blend
+// statement (missing A), leaving its default premultiplied source-over blend.
 cogl_color_out *= coverage;
 `;
 

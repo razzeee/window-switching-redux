@@ -33,6 +33,8 @@ export class SwitcherController {
         this._stockHandler = Main.wm._startSwitcher.bind(Main.wm);
         this._monitorsChangedId = Main.layoutManager.connect(
             'monitors-changed', () => this._clearPresentation());
+        this._workareasChangedId = global.display.connect(
+            'workareas-changed', () => this._clearPresentation());
         this._systemModalId = Main.layoutManager.connect(
             'system-modal-opened', () => this._clearPresentation());
 
@@ -151,6 +153,8 @@ export class SwitcherController {
     destroy() {
         Main.layoutManager.disconnect(this._monitorsChangedId);
         this._monitorsChangedId = 0;
+        global.display.disconnect(this._workareasChangedId);
+        this._workareasChangedId = 0;
         Main.layoutManager.disconnect(this._systemModalId);
         this._systemModalId = 0;
         this._clearPresentation();

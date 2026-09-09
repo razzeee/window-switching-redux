@@ -108,6 +108,10 @@ function setup(t, tabs, currentTime = 1000) {
     const getCurrentTime = t.mock.fn(() => currentTime);
     globalThis.workspace_manager = {get_active_workspace: () => workspace};
     globalThis.display = {
+        signals: new Map(), nextId: 1,
+        connect: layoutManager.connect,
+        disconnect: layoutManager.disconnect,
+        emit: layoutManager.emit,
         get_current_time_roundtrip: getCurrentTime,
         get_tab_list(type, scope) {tabCalls.push([type, scope]); return tabs;},
         sort_windows_by_stacking: windows => [...windows].sort((a, b) => a.stack - b.stack),
@@ -116,6 +120,7 @@ function setup(t, tabs, currentTime = 1000) {
     t.after(() => {
         if (controller._settings !== null)
             controller.destroy();
+        assert.equal(globalThis.display.signals.size, 0);
         for (const [key, descriptor] of previous) {
             if (descriptor)
                 Object.defineProperty(globalThis, key, descriptor);
@@ -358,13 +363,19 @@ for (const phase of ['active', 'exit']) {
         if (phase === 'exit')
             session.finish(view);
         assert.equal(layoutManager.signals.size, 2);
+        assert.deepEqual([...globalThis.display.signals.values()].map(signal => signal.name), ['workareas-changed']);
         controller.destroy();
         assert.equal(controller._session, null);
         assert.equal(controller._exitView, null);
         assert.equal(phase === 'active' ? session.destroyCount : view.destroyCount, 1);
         assert.equal(layoutManager.signals.size, 0);
+        assert.equal(globalThis.display.signals.size, 0);
+        assert.equal(controller._workareasChangedId, 0);
+        const clearPresentation = t.mock.method(controller, '_clearPresentation');
+        globalThis.display.emit('workareas-changed');
         layoutManager.emit('monitors-changed');
         layoutManager.emit('system-modal-opened');
+        assert.equal(clearPresentation.mock.callCount(), 0);
         for (const name of ['switch-applications', 'switch-applications-backward'])
             wm.handlers.get(name)('display', 'window', 'event', name);
         assert.deepEqual(wm.stockCalls, [
@@ -375,6 +386,25 @@ for (const phase of ['active', 'exit']) {
             ['switch-applications', 1], ['switch-applications-backward', 1],
             ['switch-applications', 1], ['switch-applications-backward', 1],
         ]);
+    });
+
+    test(`workarea-only change synchronously clears ${phase} presentation and allows reopening`, t => {
+        const {controller, invoke, tabCalls} = setup(t, [window('W')]);
+        const first = invoke();
+        const view = exitView();
+        if (phase === 'exit')
+            first.finish(view);
+        globalThis.display.emit('workareas-changed');
+        assert.equal(controller._session, null);
+        assert.equal(controller._exitView, null);
+        assert.equal(phase === 'active' ? first.destroyCount : view.destroyCount, 1);
+        assert.equal(view.completion, null);
+        assert.equal(uiGroup.children.size, 0);
+        globalThis.display.emit('workareas-changed');
+        layoutManager.emit('monitors-changed');
+        assert.equal(phase === 'active' ? first.destroyCount : view.destroyCount, 1);
+        assert.notEqual(invoke(), first);
+        assert.equal(tabCalls.length, 2);
     });
 }
 

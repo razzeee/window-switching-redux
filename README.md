@@ -9,8 +9,8 @@ The switcher appears only on the monitor containing the focused window when
 switching starts, including when entering a group. If there is no focused
 window with a monitor, it uses the pointer's monitor. Windows from other
 monitors remain selectable; their desktops are not dimmed by the switcher.
-Changing the monitor configuration cancels any open switcher or exit animation
-immediately. Invoke switching again to use the new layout.
+Changing the monitor configuration or work area cancels any open switcher or
+exit animation immediately. Invoke switching again to use the new layout.
 
 Public distribution is the goal, but this is not an EGO-ready release. The
 source is AI-generated. Do not upload it to extensions.gnome.org unless you
@@ -61,6 +61,9 @@ a passing run does not establish that every native-library diagnostic is benign.
 Live theme-scale and font changes are tested in full and entered-group layouts,
 including 200% St icon/control allocation and title remeasurement without rebuilding
 previews. This does not replace physical mixed-DPI or fractional-scaling checks.
+Pixel checks exercise the rounded-preview effect with opaque and translucent
+content at full and half opacity, including clipped corners and antialiased edges.
+These use controlled Clutter content, not screenshots of translucent client windows.
 Accessible focus on a collapsed grouped preview selects its app group and
 confirmation activates that group's newest window without entering the group.
 Focus requests on target icons and titles return to their owning navigation target.
@@ -93,19 +96,56 @@ the headless keymap cannot inject it; other confirmation keys use virtual input.
 
 ## Install
 
+On GNOME Shell 50, download
+`window-switching-redux@razzeee.github.io.shell-extension.zip` from the
+[GitHub release assets](https://github.com/razzeee/window-switching-redux/releases).
+Choose the `.shell-extension.zip` asset, not GitHub's automatically generated
+source archives. From the download directory, run:
+
+```sh
+gnome-extensions install --force \
+  window-switching-redux@razzeee.github.io.shell-extension.zip
+```
+
+For a local build, install the package from `dist/` instead:
+
 ```sh
 gnome-extensions install --force \
   dist/window-switching-redux@razzeee.github.io.shell-extension.zip
+```
+
+After installing or updating, log out and back in on Wayland to load the new
+extension code, then enable it:
+
+```sh
 gnome-extensions enable window-switching-redux@razzeee.github.io
 ```
 
-Restart the Shell session after installation if the extension is not visible.
-On Wayland, log out and back in. Remove it with:
+Remove it with:
 
 ```sh
 gnome-extensions disable window-switching-redux@razzeee.github.io
 rm -rf ~/.local/share/gnome-shell/extensions/window-switching-redux@razzeee.github.io
 ```
+
+## CI And Releases
+
+The `Test and Package` GitHub Actions workflow runs `npm test` and `npm run pack`
+on pushes, pull requests, published releases, and manual runs. It checks ZIP
+integrity and uploads a `shell-extension` artifact. Download and extract that
+artifact to get the installable `.shell-extension.zip` inside.
+
+To publish a downloadable build, create a GitHub release for the desired tag
+and publish it. After tests and packaging succeed, the workflow attaches the
+installable ZIP to that release. Published prereleases work too. Pushing a tag
+alone or saving a draft release does not upload a release asset. Rerunning the
+release workflow replaces the asset with the same filename.
+
+CI runs the Node tests only, not `npm run test:shell`. The Ubuntu runner supplies
+the packaging tool, not a GNOME Shell 50 runtime. Run the Shell integration tests
+and the manual checks before publishing a build intended for wider use. This
+workflow does not submit the extension to extensions.gnome.org or remove the
+generated-code notices.
 
 ## Bindings And Conflicts
 
