@@ -8,7 +8,6 @@ import Cogl from 'gi://Cogl';
 import GObject from 'gi://GObject';
 import Meta from 'gi://Meta';
 import Pango from 'gi://Pango';
-import Shell from 'gi://Shell';
 import St from 'gi://St';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
@@ -44,30 +43,22 @@ vec2 offset = abs(point - half_size) -
 float distance_to_edge = length(max(offset, vec2(0.0))) +
     min(max(offset.x, offset.y), 0.0) - clip_radius;
 float coverage = 1.0 - smoothstep(-0.5, 0.5, distance_to_edge);
-// Offscreen color is premultiplied. Cogl rejects Shell 50's RGB-only blend
-// statement (missing A), leaving its default premultiplied source-over blend.
+// Preserve premultiplied color for the offscreen pipeline's source-over blend.
 cogl_color_out *= coverage;
 `;
 
 const RoundedClipEffect = GObject.registerClass(
-class RoundedClipEffect extends Shell.GLSLEffect {
+class RoundedClipEffect extends Clutter.ShaderEffect {
     _init(radius) {
         this._radius = radius;
         super._init();
-
-        this._targetSizeLocation = this.get_uniform_location('target_size');
-        this._originLocation = this.get_uniform_location('clip_origin');
-        this._sizeLocation = this.get_uniform_location('clip_size');
-        this._presentationScaleLocation = this.get_uniform_location('presentation_scale');
-        this._radiusLocation = this.get_uniform_location('clip_radius');
     }
 
-    vfunc_build_pipeline() {
-        this.add_glsl_snippet(
+    vfunc_get_static_snippet() {
+        return Cogl.Snippet.new(
             Cogl.SnippetHook.FRAGMENT,
             ROUNDED_CLIP_DECLARATIONS,
-            ROUNDED_CLIP_CODE,
-            false);
+            ROUNDED_CLIP_CODE);
     }
 
     vfunc_paint_target(node, paintContext) {
@@ -84,15 +75,15 @@ class RoundedClipEffect extends Shell.GLSLEffect {
             this._radius * scaleFactor * resourceScale,
             width * presentationScale[0] / 2,
             height * presentationScale[1] / 2);
-        // GNOME 50 gives offscreen effects two padding pixels on the top and left.
+        // Clutter enlarges the offscreen paint box by two pixels on the top and left.
         this.set_uniform_float(
-            this._targetSizeLocation, 2, [targetWidth, targetHeight]);
+            'target_size', 2, [targetWidth, targetHeight]);
         this.set_uniform_float(
-            this._originLocation, 2, [2 * resourceScale, 2 * resourceScale]);
-        this.set_uniform_float(this._sizeLocation, 2, [width, height]);
+            'clip_origin', 2, [2 * resourceScale, 2 * resourceScale]);
+        this.set_uniform_float('clip_size', 2, [width, height]);
         this.set_uniform_float(
-            this._presentationScaleLocation, 2, presentationScale);
-        this.set_uniform_float(this._radiusLocation, 1, [radius]);
+            'presentation_scale', 2, presentationScale);
+        this.set_uniform_float('clip_radius', 1, [radius]);
         super.vfunc_paint_target(node, paintContext);
     }
 });
@@ -320,7 +311,7 @@ class SwitcherView extends St.Widget {
 
     _positionLabel(label, previewWidth, y, chromeScale, animate = false, titleOnly = false) {
         label._titleLayout = [previewWidth, y, chromeScale];
-        // GNOME 50 St.Label applies its font in style-changed, even when hidden.
+        // St.Label applies its font in style-changed, even when hidden.
         label.ensure_style();
         // Bypass explicit dimensions from the previous layout or rebuild.
         const [, naturalWidth] = label.vfunc_get_preferred_width(-1);
@@ -438,7 +429,7 @@ class SwitcherView extends St.Widget {
             style_class: 'switcher-group-chevron',
             can_focus: false,
             track_hover: false,
-            button_mask: St.ButtonMask.ONE,
+            button_mask: St.ButtonMask.PRIMARY,
             accessible_name: accessibleName,
             child: new St.Icon({icon_name: iconName, icon_size: CHEVRON_SIZE}),
         });

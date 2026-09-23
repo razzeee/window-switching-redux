@@ -1,6 +1,6 @@
 # Manual Test Matrix
 
-Run this matrix in a nested GNOME Shell 50 session where possible. Record the
+Run this matrix in a nested GNOME Shell 51 session where possible. Record the
 result and relevant journal excerpt for every failure.
 
 | Scenario | Expected result | Result |
@@ -80,7 +80,9 @@ result and relevant journal excerpt for every failure.
 
 ## Automated Coverage
 
-Verified on GNOME Shell/Mutter 50.4 on 2026-09-07 with `npm run test:shell`.
+The pre-port baseline was verified on GNOME Shell/Mutter 50.4 on 2026-09-07
+with `npm run test:shell`. The GNOME 51 port still needs this runtime suite rerun,
+including rounded-preview transparency and clipping after offscreen resizes.
 These checks complement, rather than complete, the physical-desktop matrix:
 
 - Real virtual keyboard, pointer, and touchscreen events exercise shared

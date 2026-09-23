@@ -12,12 +12,12 @@ const areas = [
 ];
 const modules = new Map([
     ['gi://Atk', 'export default {Role: {MENU: 1}}'],
-    ['gi://Clutter', 'export default {}'],
+    ['gi://Clutter', 'export default {ShaderEffect: class {}}'],
     ['gi://Cogl', 'export default {}'],
     ['gi://GObject', 'export default {registerClass: klass => klass}'],
     ['gi://Meta', 'export default {}'],
     ['gi://Pango', 'export default {}'],
-    ['gi://Shell', 'export default {GLSLEffect: class {}}'],
+    ['gi://Shell', 'export default {}'],
     ['gi://St', `export default {ThemeContext: {get_for_stage: () => ({scale_factor: 1})}, Widget: class {
         _init() {}
         set_size(width, height) { this.width = width; this.height = height; }
