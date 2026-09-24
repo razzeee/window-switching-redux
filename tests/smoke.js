@@ -332,6 +332,8 @@ function assertSelection(view, index, message, selectionActor = view._targetActo
 
 async function testRoundedPixels(view) {
     const Effect = view._cloneEntries[0].clone.get_effects()[0].constructor;
+    assert(view._cloneEntries[0].clone.get_effects()[0] instanceof Clutter.ShaderEffect,
+        'Rounded previews use the GNOME 51 shader effect');
     const background = new Clutter.Actor({
         x: 100, y: 100, width: 160, height: 160,
         background_color: new Cogl.Color({red: 0, green: 0, blue: 255, alpha: 255}),
@@ -351,7 +353,10 @@ async function testRoundedPixels(view) {
         return [color.red, color.green, color.blue];
     };
     try {
-        for (const [alpha, opacity] of [[255, 255], [128, 255], [255, 128], [128, 128]]) {
+        for (const [alpha, opacity, size] of [[255, 255, 100], [128, 255, 120], [255, 128, 100], [128, 128, 110]]) {
+            // Resizing replaces the offscreen pipeline; the shader must still clip it.
+            preview.set_size(size, size);
+            source.set_size(size, size);
             source.background_color = new Cogl.Color({red: 255, green: 0, blue: 0, alpha});
             preview.opacity = opacity;
             await new Promise(resolve => {
@@ -381,19 +386,8 @@ async function testRoundedPixels(view) {
                 }
             }
             assert(partial, 'Fixture samples a partially covered rounded edge');
-            console.log(`PASS: rounded pixels alpha=${alpha} opacity=${opacity}, center=${center}, clipped corner and antialiased edge`);
+            console.log(`PASS: rounded pixels size=${size} alpha=${alpha} opacity=${opacity}, center=${center}, clipped corner and antialiased edge`);
         }
-        const pipeline = Cogl.Pipeline.new(global.stage.context.get_backend().get_cogl_context());
-        let rejected = false;
-        try {
-            pipeline.set_blend('RGB = ADD (SRC_COLOR * (SRC_COLOR[A]), DST_COLOR * (1-SRC_COLOR[A]))');
-        } catch (error) {
-            rejected = error.message.includes('Alpha channel');
-        }
-        assert(rejected, 'Cogl rejects Shell 50 GLSLEffect RGB-only blend statement without changing the default');
-        assert(pipeline.set_blend('RGBA = ADD (SRC_COLOR, DST_COLOR * (1-SRC_COLOR[A]))'),
-            'Cogl accepts explicit premultiplied source-over on an owned pipeline');
-        console.log('PASS: real Cogl rejects upstream RGB-only blend and accepts premultiplied RGBA on an owned pipeline');
     } finally {
         background.destroy();
     }

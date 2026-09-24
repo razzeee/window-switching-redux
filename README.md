@@ -1,6 +1,6 @@
 # Window Switching Redux
 
-A GNOME Shell 50 extension that combines recent-window switching with application
+A GNOME Shell 51 extension that combines recent-window switching with application
 groups. Reach your four most recent windows directly, or enter a group to choose
 from all of an application's windows.
 
@@ -33,7 +33,7 @@ invoke it again to use the new layout.
 
 ## Install
 
-Requires **GNOME Shell 50** and the `gnome-extensions` command. To build from this
+Requires **GNOME Shell 51** and the `gnome-extensions` command. To build from this
 checkout, you also need npm to run the packaging script.
 
 From the repository root:
@@ -97,7 +97,7 @@ Run model, layout, and stubbed Shell-input tests with Node.js 22.15 or later:
 npm test
 ```
 
-For integration tests, you also need GNOME Shell 50, `gnome-shell-test-tool`,
+For integration tests, you also need GNOME Shell 51, `gnome-shell-test-tool`,
 `dbus-run-session`, and `gnome-extensions`:
 
 ```sh
@@ -126,12 +126,11 @@ The package includes the runtime modules, metadata, stylesheet, and license file
 Tests, plans, and research are excluded.
 
 See [CONTEXT.md](CONTEXT.md) for the switching model and terminology, and the
-[GNOME Shell 50 API research](docs/research/gnome-shell-50-switcher-apis.md)
-for implementation references.
+[manual test matrix](tests/manual-test-matrix.md) for runtime validation status.
 
 ## Known Limitations
 
-- GNOME Shell 50 only. The implementation uses private Shell JavaScript APIs.
+- GNOME Shell 51 only. The implementation uses private Shell JavaScript APIs.
 - Every target stays visible. At high window counts or in small work areas,
   previews and hit areas shrink; keyboard traversal remains the supported path.
   A usable overflow policy is still needed.
@@ -145,7 +144,7 @@ for implementation references.
 ## Troubleshooting
 
 If the extension does not appear after installation, restart your Shell session
-and check that you are running GNOME Shell 50. If another switcher appears,
+and check that you are running GNOME Shell 51. If another switcher appears,
 disable competing switcher extensions.
 
 Follow Shell logs with:
