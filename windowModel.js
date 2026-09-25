@@ -31,27 +31,21 @@ export function buildTraversal(windowRecords, recentLimit) {
     const targets = records.slice(0, recentLimit).map(directTarget);
     const groups = new Map();
 
-    records.forEach((record, index) => {
+    records.slice(recentLimit).forEach(record => {
         if (record.application === null) {
-            if (index >= recentLimit)
-                targets.push(directTarget(record));
+            targets.push(directTarget(record));
             return;
         }
 
         if (!groups.has(record.application))
-            groups.set(record.application, {records: [], eligible: false});
+            groups.set(record.application, []);
 
-        const group = groups.get(record.application);
-        group.records.push(record);
-        group.eligible ||= index >= recentLimit;
+        groups.get(record.application).push(record);
     });
 
     for (const [application, group] of groups) {
-        if (!group.eligible)
-            continue;
-
-        targets.push(groupTarget(application, group.records));
-        targets.push(...group.records.map(groupedTarget));
+        targets.push(groupTarget(application, group));
+        targets.push(...group.map(groupedTarget));
     }
 
     return Object.freeze(targets);

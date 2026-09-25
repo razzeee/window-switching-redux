@@ -61,8 +61,8 @@ test('canonical mixed traversal has the exact target sequence', () => {
 
     assert.deepEqual(labels(targets), [
         'F1 direct', 'T1 direct', 'F2 direct', 'B1 direct',
-        'Files group', 'F1 grouped', 'F2 grouped', 'F3 grouped',
-        'Text Editor group', 'T1 grouped', 'T2 grouped',
+        'Text Editor group', 'T2 grouped',
+        'Files group', 'F3 grouped',
     ]);
 });
 
@@ -74,7 +74,7 @@ test('top-level navigation excludes grouped windows', () => {
 
     assert.deepEqual(getTopLevelIndices(targets).map(index => labels([targets[index]])[0]), [
         'F1 direct', 'T1 direct', 'F2 direct', 'B1 direct',
-        'Files group', 'Text Editor group',
+        'Text Editor group', 'Files group',
     ]);
 });
 
@@ -85,7 +85,7 @@ test('group navigation contains only app-local grouped windows', () => {
     ], 4);
 
     assert.deepEqual(getGroupIndices(targets, apps.Files).map(index => labels([targets[index]])[0]), [
-        'F1 grouped', 'F2 grouped', 'F3 grouped',
+        'F3 grouped',
     ]);
 });
 
@@ -114,13 +114,13 @@ test('scoped removal skips grouped representations at top level', () => {
         getTopLevelIndices(result.targets));
 
     assert.equal(result.targets[selectedIndex].kind, 'app-group');
-    assert.equal(result.targets[selectedIndex].application, apps.Files);
+    assert.equal(result.targets[selectedIndex].application, apps['Text Editor']);
 });
 
 test('scoped removal advances within an entered group', () => {
     const targets = buildTraversal([
-        record('F1', 'Files'), record('T1', 'Text Editor'), record('F2', 'Files'),
-        record('B1', 'Browser'), record('T2', 'Text Editor'), record('F3', 'Files'),
+        record('F1', 'Files'), record('T1', 'Text Editor'), record('T2', 'Text Editor'),
+        record('B1', 'Browser'), record('F2', 'Files'), record('F3', 'Files'),
     ], 4);
     const removedIndex = targets.findIndex(target =>
         target.kind === 'grouped-window' && target.window === windows.F2);
@@ -144,7 +144,7 @@ test('reverse invocation starts at the final top-level target', () => {
 
     const selectedIndex = getInitialSelection(targets, windows.F1, -1);
     assert.equal(targets[selectedIndex].kind, 'app-group');
-    assert.equal(targets[selectedIndex].application, apps['Text Editor']);
+    assert.equal(targets[selectedIndex].application, apps.Files);
 });
 
 test('a recent single-window application receives no app group', () => {
@@ -167,11 +167,12 @@ test('an older single-window application remains reachable through its app group
     ]);
 });
 
-test('recent windows reappear in eligible application groups', () => {
+test('recent windows appear once and group activation resolves only to remaining windows', () => {
     const targets = buildTraversal([record('F1', 'Files'), record('T1', 'Text Editor'), record('F2', 'Files'), record('B1', 'Browser'), record('F3', 'Files')], 4);
 
-    assert.equal(labels(targets).filter(label => label.startsWith('F1 ')).length, 2);
-    assert.equal(labels(targets).filter(label => label.startsWith('F2 ')).length, 2);
+    assert.equal(labels(targets).filter(label => label.startsWith('F1 ')).length, 1);
+    assert.equal(labels(targets).filter(label => label.startsWith('F2 ')).length, 1);
+    assert.deepEqual(targets.find(target => target.kind === 'app-group').windows.map(entry => entry.window), [windows.F3]);
 });
 
 test('unassociated windows stay direct and never form a group', () => {
@@ -199,7 +200,7 @@ test('older unassociated windows follow recent direct targets before application
 
     assert.deepEqual(labels(targets), [
         'F1 direct', 'T1 direct', 'F2 direct', 'B1 direct', 'T2 direct', 'U1 direct',
-        'Files group', 'F1 grouped', 'F2 grouped', 'F3 grouped',
+        'Files group', 'F3 grouped',
     ]);
     assert.equal(targets[4].application, null);
     assert.equal(targets[5].application, null);
@@ -218,12 +219,12 @@ test('older unassociated windows follow recent direct targets before application
     assert.equal(result.targets[result.selectedIndex].window, windows.U1);
 });
 
-test('group order uses each application newest global window', () => {
+test('group order uses each application newest remaining window', () => {
     const targets = buildTraversal([
         record('F1', 'Files'), record('T1', 'Text Editor'), record('B1', 'Browser'), record('F2', 'Files'), record('T2', 'Text Editor'), record('F3', 'Files'),
     ], 4);
 
-    assert.deepEqual(targets.filter(target => target.kind === 'app-group').map(target => target.application.name), ['Files', 'Text Editor']);
+    assert.deepEqual(targets.filter(target => target.kind === 'app-group').map(target => target.application.name), ['Text Editor', 'Files']);
 });
 
 test('forward and reverse traversal are exact circular inverses', () => {
@@ -253,17 +254,19 @@ test('removal selects the next target in each traversal direction', () => {
     assert.equal(reverse.targets[reverse.selectedIndex].window, windows.F1);
 });
 
-test('removing a duplicated recent window removes both targets and selects one survivor', () => {
+test('removing a recent window does not promote a group member', () => {
     const targets = buildTraversal([record('F1', 'Files'), record('T1', 'Text Editor'), record('F2', 'Files'), record('B1', 'Browser'), record('F3', 'Files')], 4);
-    const groupedF1Index = targets.findIndex(target => target.kind === 'grouped-window' && target.window === windows.F1);
-    const result = removeWindowFromTraversal(targets, groupedF1Index, windows.F1, 1);
+    const result = removeWindowFromTraversal(targets, 0, windows.F1, 1);
 
     assert.equal(result.targets.some(target => target.window === windows.F1), false);
-    assert.equal(result.targets[result.selectedIndex].window, windows.F2);
+    assert.equal(result.targets[result.selectedIndex].window, windows.T1);
+    assert.equal(result.targets.filter(target => target.kind === 'direct-window').length, 3);
+    assert.deepEqual(result.targets.find(target => target.kind === 'app-group').windows.map(entry => entry.window), [windows.F3]);
 });
 
 test('a selected group stays selected when its newest window closes', () => {
-    const targets = buildTraversal([record('F1', 'Files'), record('T1', 'Text Editor'), record('F2', 'Files'), record('B1', 'Browser'), record('F3', 'Files')], 4);
+    const targets = buildTraversal([record('T1', 'Text Editor'), record('T2', 'Text Editor'), record('U1'), record('B1', 'Browser'),
+        record('F1', 'Files'), record('F2', 'Files'), record('F3', 'Files')], 4);
     const groupIndex = targets.findIndex(target => target.kind === 'app-group');
     const result = removeWindowFromTraversal(targets, groupIndex, windows.F1, 1);
 
@@ -272,11 +275,11 @@ test('a selected group stays selected when its newest window closes', () => {
     assert.equal(result.targets[result.selectedIndex].windows[0].window, windows.F2);
 });
 
-test('a formerly eligible group survives removal of its only older window', () => {
+test('a group disappears when its final remaining window closes', () => {
     const targets = buildTraversal([record('F1', 'Files'), record('T1', 'Text Editor'), record('F2', 'Files'), record('B1', 'Browser'), record('F3', 'Files')], 4);
     const result = removeWindowFromTraversal(targets, 0, windows.F3, 1);
     const group = result.targets.find(target => target.kind === 'app-group');
 
-    assert.ok(group);
-    assert.deepEqual(group.windows.map(entry => entry.window.name), ['F1', 'F2']);
+    assert.equal(group, undefined);
+    assert.deepEqual(labels(result.targets), ['F1 direct', 'T1 direct', 'F2 direct', 'B1 direct']);
 });
