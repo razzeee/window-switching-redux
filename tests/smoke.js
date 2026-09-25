@@ -15,6 +15,8 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as Scripting from 'resource:///org/gnome/shell/ui/scripting.js';
 
 import {testLifecycle} from './lifecycle.js';
+import {testPresentation} from './presentation.js';
+import {testDesktopStacking} from './stacking.js';
 
 function assert(condition, message) {
     if (!condition)
@@ -77,12 +79,11 @@ async function testLabel(view, index) {
 }
 
 async function testTitleNotification(view) {
-    const directIndex = view._targets.findIndex(target => target.kind === 'direct-window' &&
-        view._targets.some(candidate => candidate.kind === 'grouped-window' && candidate.window === target.window));
-    assert(directIndex >= 0, 'Title fixture needs duplicate representations of a real window');
+    const directIndex = view._targets.findIndex(target => target.kind === 'direct-window');
+    assert(directIndex >= 0, 'Title fixture needs a real window');
     const window = view._targets[directIndex].window;
     const actors = view._targets.flatMap((target, index) => target.window === window ? [view._targetActors[index]] : []);
-    assert(actors.length === 2, 'Title fixture has direct and grouped window targets');
+    assert(actors.length === 1, 'Each window has one title and preview');
     const title = window.get_title();
     const staleTitle = 'Stale title signal fixture with deliberately different text';
     assert(title !== staleTitle, 'Signal fixture differs from the real Meta.Window title');
@@ -152,7 +153,7 @@ async function testTitleNotification(view) {
             assertNear(label.width, width, 'Real title transition reaches retargeted width');
             assertNear(label.x, (1200 - width * 0.75) / 2, 'Real title transition reaches retargeted center');
         }
-        console.log('PASS: real Meta.Window notify::title signal fixture updates duplicate St/ATK names and retargets active label endpoints without cancelling preview animation');
+        console.log('PASS: real Meta.Window title signals update St/ATK names without cancelling preview animation');
     } finally {
         for (const actor of actors) {
             actor._selectionLabel.text = title;
@@ -208,10 +209,6 @@ async function testEnlargedTitles(view, groupIndex) {
             return target.application === view._targets[groupIndex].application && target.kind !== 'direct-window' ? [index] : [];
         });
         const windows = indices.filter(index => view._targets[index].kind !== 'app-group');
-        const split = windows.length > 2 ? Math.ceil(windows.length / 2) : windows.length;
-        const nextRowTop = windows.length > split
-            ? Math.min(...windows.slice(split).map(index => view._targetActors[index].y))
-            : Infinity;
         for (const index of indices) {
             view.setSelection(index);
             // Shell leisure does not flush Clutter's pending allocation/paint.
@@ -242,11 +239,12 @@ async function testEnlargedTitles(view, groupIndex) {
             assert([x, y, width, height].every(Number.isFinite), `Painted title bounds must be finite: ${diagnostic}`);
             assert(x >= area.x - 1 && x + width <= area.x + area.width + 1 &&
                 y >= area.y - 1 && y + height <= area.y + area.height + 1, `Enlarged title stays within work area: ${diagnostic}`);
-            if (windows.slice(0, split).includes(index))
-                assert(y + height <= nextRowTop + 1, `Enlarged title stays above next row at ${nextRowTop}: ${diagnostic}`);
+            const nextRowTop = Math.min(Infinity, ...windows.map(next => view._targetActors[next])
+                .filter(next => next.y > actor.y + actor.height + 1).map(next => next.y));
+            assert(y + height <= nextRowTop + 1, `Enlarged title stays above next row at ${nextRowTop}: ${diagnostic}`);
             if (index === groupIndex)
                 assert(y + height <= actor.y + actor.height + 1, 'Enlarged application title stays within group');
-            else if (entered && windows.slice(split).includes(index))
+            else if (entered)
                 assert(y + height <= view._targetActors[groupIndex].y + 1, 'Last title row stays above application chrome');
         }
     };
@@ -279,10 +277,10 @@ async function testLiveTheme(view, groupIndex, childIndex) {
         assert(view._cloneEntries.every((entry, index) => entry.clone === clones[index]), 'Theme refresh preserves live clones');
         const direct = view._targetActors[directIndex]._directIcon;
         const group = view._targetActors[groupIndex];
-        assertNear(direct.width, 96, 'Direct icon backing scales to 200%');
-        assertNear(group._iconBin.width, 240, 'Group icon backing scales to 200%');
+        assertNear(direct.width, 128, 'Direct icon backing scales to 200%');
+        assertNear(group._iconBin.width, 128, 'Group icon backing scales to 200%');
         assertNear(group._downChevron.width, 80, 'Chevron backing scales to 200%');
-        assertNear(direct.child.icon_size, 48, 'St.Icon keeps its logical size');
+        assertNear(direct.child.icon_size, 64, 'St.Icon keeps its logical size');
 
         for (const entered of [false, true]) {
             if (entered)
@@ -401,14 +399,15 @@ async function testPreviewMapping(view, application) {
     const check = entered => {
         for (const entry of view._cloneEntries) {
             const target = view._targets[entry.targetIndex];
-            const expected = !entered || target.kind === 'grouped-window' && target.application === application;
-            assert(entry.clone.mapped === expected, 'Preview wrapper mapping follows navigation scope');
+            assert(entry.clone.mapped, 'Every preview remains mapped in the grid or at an edge');
             for (const clone of entry.clone.get_children())
-                assert(clone.mapped === expected, 'Actual Clutter.Clone mapping follows navigation scope');
+                assert(clone.mapped, 'Actual Clutter.Clone remains mapped');
+            if (entered && target.kind === 'direct-window')
+                assert(!entry.targetActor.reactive && !entry.targetActor.can_focus, 'Edge previews are inactive');
         }
     };
     check(false);
-    // Force the hidden-preview backing resize path, including its second fade.
+    // Exercise backing resizes while previews remain at the edges.
     const direct = view._cloneEntries.find(entry => view._targets[entry.targetIndex].kind === 'direct-window');
     view._rebasePreview(direct, {width: 1000, height: 750});
     view.enterGroup(application);
@@ -417,7 +416,7 @@ async function testPreviewMapping(view, application) {
     view._rebasePreview(direct, {width: 1100, height: 825});
     view._applyComposition(true);
     check(true);
-    assert(direct.clone.get_transition('opacity') === null, 'Hidden backing rebase does not animate or remap');
+    assert(direct.clone.opacity === 255, 'Edge backing resize preserves opacity');
     view.leaveGroup();
     check(false);
     await settle();
@@ -428,7 +427,7 @@ async function testPreviewMapping(view, application) {
     await settle();
     check(false);
     assert(view._cloneEntries.every(entry => entry.clone.opacity === 255), 'Interrupted fade cannot hide returned previews');
-    console.log('PASS: real preview wrapper/Clutter.Clone unmapping, hidden backing rebase, remapping and interrupted return');
+    console.log('PASS: real edge preview mapping, backing resize, scope inactivity and interrupted return');
 }
 
 function prepareHoveredTeardown(view, groupIndex, childIndex) {
@@ -560,12 +559,12 @@ async function testSession(SwitcherSession, targets, startingWindow, groupIndex,
         for (const [index, target] of targets.entries()) {
             if (target.kind === 'direct-window' || target.application !== targets[groupIndex].application) {
                 const actor = session._view._targetActors[index];
-                assert(!actor.visible && !actor.can_focus && !actor.reactive,
-                    'Out-of-scope target is hidden, unfocusable and nonreactive after enter animation');
+                assert(actor.visible && !actor.can_focus && !actor.reactive,
+                    'Edge target stays visible, unfocusable and nonreactive after enter animation');
                 for (const preview of actor._previewActors) {
-                    assert(!preview.mapped, 'Out-of-scope preview sibling must be unmapped');
+                    assert(preview.mapped, 'Edge preview remains mapped');
                     for (const clone of preview.get_children())
-                        assert(!clone.mapped, 'Out-of-scope Clutter.Clone must be unmapped');
+                        assert(clone.mapped, 'Edge Clutter.Clone remains mapped');
                 }
             }
         }
@@ -802,14 +801,18 @@ export async function run() {
     const helper = await Scripting._getPerfHelper();
     let view = null;
     try {
+        Main.overview.hide();
+        await Scripting.waitLeisure();
         // A group is eligible only beyond the four recent direct-window slots.
         // Scripting's convenience wrappers log and swallow D-Bus failures instead of rejecting.
-        for (let i = 0; i < 5; i++)
+        for (let i = 0; i < 7; i++)
             await helper.CreateWindowAsync(640 + i * 20, 480, false, false, false, false);
         await helper.WaitWindowsAsync();
         Main.overview.hide();
         await Scripting.waitLeisure();
         const targets = extension.stateObj._controller._snapshot();
+        await testPresentation(extension, targets[0].window);
+        await testDesktopStacking(extension, targets.filter(target => target.kind !== 'app-group'));
         const groupIndex = targets.findIndex(target => target.kind === 'app-group' && target.windows.length >= 2);
         assert(groupIndex >= 0, 'Helper windows must form a real application group');
         const childIndex = targets.findIndex(target =>
@@ -832,8 +835,11 @@ export async function run() {
         await testLiveTheme(view, groupIndex, childIndex);
         await testPreviewMapping(view, targets[groupIndex].application);
 
+        const retainedPreviews = new Map(view._cloneEntries.map(entry => [entry.surface, entry.clone]));
         const checkRebuild = prepareHoveredTeardown(view, groupIndex, childIndex);
         view.setTargets(targets);
+        assert(view._cloneEntries.every(entry => entry.clone === retainedPreviews.get(entry.surface)),
+            'Target reconciliation preserves each live preview and its source suppression');
         checkRebuild();
         view.setSelection(groupIndex);
         assertSelection(view, groupIndex, 'Rebuilt view supports shared selection');

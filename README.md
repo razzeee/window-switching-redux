@@ -2,7 +2,7 @@
 
 A GNOME Shell 51 extension that combines recent-window switching with application
 groups. Reach your four most recent windows directly, or enter a group to choose
-from all of an application's windows.
+from its remaining windows.
 
 This is a behavioral prototype, not an EGO-ready release. The source is
 AI-generated. Do not upload it to extensions.gnome.org unless you understand the
@@ -17,9 +17,18 @@ The switcher shows targets in this order:
 2. Any older windows without an associated application, also selectable directly.
 3. Application groups for apps with at least one window outside the recent four.
 
-Each application group contains **all of that app's windows**, including any
-already shown as recent windows. Activating a group focuses its most recently
-used window. Enter the group to choose a different one.
+Each window appears once. Application groups contain only windows outside the
+recent four, and groups are ordered by their newest remaining member. Activating
+a group focuses that member. Enter the group to choose a different one.
+
+All top-level targets share a centered grid. Groups use compact stacks; previews
+preserve aspect ratio and small windows can scale up. App icons use the same
+64-logical-pixel size. Visible desktop windows animate into the picker while
+their original desktop painting is suppressed, then return on dismissal.
+
+Entering a group spreads its windows into a centered grid. Other targets move
+to the left and right edges and remain partly visible but inactive. Leaving
+the group returns them to their original positions.
 
 Window order stays fixed while the switcher is open, except that closed windows
 are removed. Forward invocation skips the starting window so a quick switch takes
@@ -134,7 +143,6 @@ See [CONTEXT.md](CONTEXT.md) for the switching model and terminology, and the
 - Every target stays visible. At high window counts or in small work areas,
   previews and hit areas shrink; keyboard traversal remains the supported path.
   A usable overflow policy is still needed.
-- Source windows remain visible behind their live previews.
 - Orca announcements and navigation still need manual validation, as do large
   text, high-contrast themes, fractional scaling, and physical multi-monitor use.
 - Hardware checks for hotplug, lock/unlock, suspend/resume, nested dialogs, and

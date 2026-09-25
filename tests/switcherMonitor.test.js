@@ -11,6 +11,7 @@ const areas = [
     {x: 1920, y: 800, width: 1920, height: 1080},
 ];
 const modules = new Map([
+    ['./switcherPresentation.js', 'export class SwitcherPresentation {}'],
     ['gi://Atk', 'export default {Role: {MENU: 1}}'],
     ['gi://Clutter', 'export default {ShaderEffect: class {}}'],
     ['gi://Cogl', 'export default {}'],

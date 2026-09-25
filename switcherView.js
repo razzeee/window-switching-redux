@@ -14,13 +14,15 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {
     calculateEnteredLayout,
+    calculateEdgeLayout,
     calculateFullLayout,
     CHEVRON_SIZE,
     DIRECT_ICON_SIZE,
     ICON_SIZE,
 } from './switcherLayout.js';
+import {SwitcherPresentation} from './switcherPresentation.js';
 
-const APP_ICON_CONTENT_SIZE = 110;
+const APP_ICON_CONTENT_SIZE = ICON_SIZE;
 const PREVIEW_CORNER_RADIUS = 12;
 const ENTRANCE_TIME = 220;
 const TRANSITION_TIME = 180;
@@ -125,6 +127,7 @@ function previewGeometry(actor) {
         width: actor.width * actor.scale_x,
         height: actor.height * actor.scale_y,
         opacity: actor.opacity,
+        rotation: actor.rotation_angle_z,
     };
 }
 
@@ -134,6 +137,7 @@ function previewProperties(entry, geometry) {
         y: geometry.y,
         scale_x: geometry.width / entry.baseWidth,
         scale_y: geometry.height / entry.baseHeight,
+        rotation_angle_z: geometry.rotation ?? 0,
     };
     if (geometry.opacity !== undefined)
         properties.opacity = geometry.opacity;
@@ -169,11 +173,15 @@ function destinationForSurface(record, surface, geometry) {
     const bounds = recordBounds(record);
     const sourceRect = surface.get_buffer_rect();
     const scale = Math.min(geometry.width / bounds.width, geometry.height / bounds.height);
+    const angle = (geometry.rotation ?? 0) * Math.PI / 180;
+    const dx = (sourceRect.x - bounds.x) * scale;
+    const dy = (sourceRect.y - bounds.y) * scale;
     return {
-        x: geometry.x + (sourceRect.x - bounds.x) * scale,
-        y: geometry.y + (sourceRect.y - bounds.y) * scale,
+        x: geometry.x + dx * Math.cos(angle) - dy * Math.sin(angle),
+        y: geometry.y + dx * Math.sin(angle) + dy * Math.cos(angle),
         width: sourceRect.width * scale,
         height: sourceRect.height * scale,
+        rotation: geometry.rotation ?? 0,
     };
 }
 
@@ -195,6 +203,18 @@ class SwitcherView extends St.Widget {
         this._targetActors = [];
         this._cloneEntries = [];
         this._sourceGeometrySignals = new Map();
+        this._presentation = new SwitcherPresentation(
+            () => new RoundedClipEffect(PREVIEW_CORNER_RADIUS),
+            (source, entry) => {
+                entry.targetActor._previewActors = entry.targetActor._previewActors.filter(actor => actor !== entry.clone);
+                const signals = this._sourceGeometrySignals.get(source);
+                if (signals !== undefined) {
+                    for (const signal of signals)
+                        source.disconnect(signal);
+                    this._sourceGeometrySignals.delete(source);
+                    this._queueGeometryRefresh();
+                }
+            });
         this._windowTitleSignals = new Map();
         this._pendingTitleLabels = new Set();
         this._titleLaterId = 0;
@@ -203,16 +223,11 @@ class SwitcherView extends St.Widget {
         this._themeScale = this._themeContext.scale_factor;
         this._themeSignalId = 0;
         this._keyFocusSignalId = 0;
+        this._desktopStackSignalId = 0;
         this._clickActions = [];
         this._chromeActors = [];
         this._selectedIndex = -1;
         this._exitTargetIndex = null;
-        this._entranceTargetIndex = targets.findIndex(target =>
-            target.kind === 'direct-window' && target.window === startingWindow);
-        if (this._entranceTargetIndex === -1) {
-            this._entranceTargetIndex = targets.findIndex(target =>
-                target.kind === 'grouped-window' && target.window === startingWindow);
-        }
         this._backdropActor = null;
         this._fullLayout = null;
         let monitorIndex = startingWindow === null ? -1 : startingWindow.get_monitor();
@@ -413,7 +428,7 @@ class SwitcherView extends St.Widget {
 
     _positionDirectIcon(actor, geometry, animate) {
         const backingSize = DIRECT_ICON_SIZE * this._themeScale;
-        const iconSize = Math.min(backingSize * geometry.chromeScale, geometry.height / 3, geometry.width);
+        const iconSize = backingSize;
         this._setActorProperties(actor._directIcon, {
             x: (geometry.width - iconSize) / 2,
             y: geometry.height - iconSize / 2,
@@ -592,68 +607,28 @@ class SwitcherView extends St.Widget {
                 continue;
             const destination = destinationForSurface(record, surface, geometry);
             const savedState = initialPositions?.get(record)?.get(surface);
-            const initial = savedState ?? sourceGeometry(source);
+            const desktopVisible = source.visible && surface.showing_on_its_workspace();
+            const initial = savedState ?? (desktopVisible ? sourceGeometry(source) : {...destination, opacity: 0});
             let backingGeometry = destination;
             if (savedState !== undefined) {
                 backingGeometry = {
                     width: Math.max(savedState.baseWidth, destination.width),
                     height: Math.max(savedState.baseHeight, destination.height),
                 };
-            } else if (index === this._entranceTargetIndex &&
-                St.Settings.get().enable_animations) {
+            } else if (desktopVisible && St.Settings.get().enable_animations) {
                 backingGeometry = initial;
             }
             const baseWidth = Math.max(1, Math.round(backingGeometry.width));
             const baseHeight = Math.max(1, Math.round(backingGeometry.height));
-            const clone = new Clutter.Clone({
-                source,
-                x_expand: true,
-                y_expand: true,
-            });
-            const preview = new Clutter.Actor({
-                clip_to_allocation: true,
-                layout_manager: new Clutter.BinLayout(),
-            });
-            preview.add_child(clone);
-            preview.add_effect(new RoundedClipEffect(PREVIEW_CORNER_RADIUS));
-            preview.set_position(initial.x, initial.y);
-            preview.set_size(baseWidth, baseHeight);
-            preview.scale_x = initial.width / baseWidth;
-            preview.scale_y = initial.height / baseHeight;
-            if (initial.opacity !== undefined)
-                preview.opacity = initial.opacity;
+            const entry = this._presentation.acquire(surface, baseWidth, baseHeight);
+            const preview = entry.clone;
+            if (savedState === undefined)
+                this._setActorProperties(preview, previewProperties(entry, initial), false);
             this.add_child(preview);
             this.set_child_below_sibling(preview, targetActor);
             targetActor._previewActors.push(preview);
-            const entry = {
-                clone: preview,
-                source,
-                surface,
-                signal: 0,
-                targetIndex: index,
-                targetActor,
-                baseWidth,
-                baseHeight,
-                exitComplete: null,
-            };
-            entry.signal = source.connect('destroy', () => {
-                const geometrySignals = this._sourceGeometrySignals.get(source);
-                if (geometrySignals !== undefined) {
-                    for (const signal of geometrySignals)
-                        source.disconnect(signal);
-                    this._sourceGeometrySignals.delete(source);
-                    this._queueGeometryRefresh();
-                }
-                targetActor._previewActors = targetActor._previewActors.filter(actor => actor !== preview);
-                preview.destroy();
-                entry.clone = null;
-                entry.source = null;
-                entry.signal = 0;
-                if (surface === record.window)
-                    targetActor.add_style_class_name('switcher-target-unavailable');
-                if (entry.exitComplete !== null)
-                    entry.exitComplete();
-            });
+            entry.targetIndex = index;
+            entry.targetActor = targetActor;
             this._cloneEntries.push(entry);
             if (!this._sourceGeometrySignals.has(source)) {
                 let previousRect = surface.get_buffer_rect();
@@ -795,6 +770,48 @@ class SwitcherView extends St.Widget {
             });
         }
 
+        this._restackPickerPreviews();
+
+        if (initialState === null)
+            this._beginEntrance();
+        else {
+            this._applyComposition(true);
+            this._setActorProperties(
+                this._backdropActor,
+                {opacity: 255},
+                St.Settings.get().enable_animations);
+        }
+    }
+
+    _syncDesktopStack() {
+        const previews = new Map(this._cloneEntries
+            .filter(entry => entry.source !== null && entry.clone !== null)
+            .map(entry => [entry.surface, entry.clone]));
+        let sibling = this._backdropActor;
+        for (const window of global.display.sort_windows_by_stacking([...previews.keys()])) {
+            const preview = previews.get(window);
+            this.set_child_above_sibling(preview, sibling);
+            sibling = preview;
+        }
+    }
+
+    _followDesktopStack() {
+        if (this._desktopStackSignalId === 0) {
+            this._desktopStackSignalId = global.display.connect('restacked', () =>
+                this._syncDesktopStack());
+        }
+        this._syncDesktopStack();
+    }
+
+    _disconnectDesktopStack() {
+        if (this._desktopStackSignalId !== 0) {
+            global.display.disconnect(this._desktopStackSignalId);
+            this._desktopStackSignalId = 0;
+        }
+    }
+
+    _restackPickerPreviews() {
+        this._disconnectDesktopStack();
         for (const group of this._fullLayout.groups) {
             let sibling = this._targetActors[group.index];
             for (let i = group.children.length - 1; i >= 0; i--) {
@@ -809,25 +826,16 @@ class SwitcherView extends St.Widget {
             this.set_child_above_sibling(
                 this._targetActors[group.index]._groupOutline, sibling);
         }
-
-        if (initialState === null)
-            this._beginEntrance();
-        else {
-            this._applyComposition(true);
-            this._setActorProperties(
-                this._backdropActor,
-                {opacity: 255},
-                St.Settings.get().enable_animations);
-        }
     }
 
     _beginEntrance() {
         const animationsEnabled = St.Settings.get().enable_animations;
+        this._followDesktopStack();
         for (const actor of this._chromeActors)
             actor.opacity = animationsEnabled ? 0 : 255;
         if (animationsEnabled) {
             for (const entry of this._cloneEntries) {
-                if (entry.clone === null || entry.targetIndex === this._entranceTargetIndex)
+                if (entry.clone === null || entry.source !== null)
                     continue;
                 const target = this._targets[entry.targetIndex];
                 const geometry = this._fullLayout.geometries.get(entry.targetIndex);
@@ -842,8 +850,8 @@ class SwitcherView extends St.Widget {
         }
         this._applyComposition(animationsEnabled, ENTRANCE_TIME, null, true);
         this._setActorProperties(
-            this._backdropActor, {opacity: 255}, animationsEnabled, ENTRANCE_TIME);
-        this._entranceTargetIndex = -1;
+            this._backdropActor, {opacity: 255}, animationsEnabled, ENTRANCE_TIME,
+            () => this._restackPickerPreviews());
     }
 
     _setActorProperties(
@@ -903,27 +911,6 @@ class SwitcherView extends St.Widget {
         });
     }
 
-    _setHiddenPreviewProperties(entry, properties, destination, animate, duration) {
-        if (!animate || !entry.clone.visible) {
-            this._setActorProperties(entry.clone, properties, false);
-            this._rebasePreview(entry, destination, {...destination, opacity: 0});
-            entry.clone.hide();
-            return;
-        }
-
-        const finalFadeDuration = Math.min(32, Math.ceil(duration / 3));
-        this._setActorProperties(
-            entry.clone,
-            {...properties, opacity: 1},
-            true,
-            duration - finalFadeDuration,
-            () => {
-                this._rebasePreview(entry, destination, {...destination, opacity: 1});
-                this._setActorProperties(
-                    entry.clone, {opacity: 0}, true, finalFadeDuration, () => entry.clone.hide());
-            });
-    }
-
     _rebasePreview(entry, geometry, presentedGeometry = null) {
         const baseWidth = Math.max(1, Math.round(geometry.width));
         const baseHeight = Math.max(1, Math.round(geometry.height));
@@ -950,49 +937,36 @@ class SwitcherView extends St.Widget {
         const enteredIndices = entered === null
             ? new Set()
             : new Set(entered.geometries.keys());
-        const stagedDirectIndices = groupTransition === null
-            ? new Set()
-            : new Set(this._targets.flatMap((target, index) => {
-                if (target.kind !== 'direct-window' ||
-                    target.application !== groupTransition.application) {
-                    return [];
-                }
-                const duplicated = this._targets.some(candidate =>
-                    candidate.kind === 'grouped-window' &&
-                    candidate.application === groupTransition.application &&
-                    candidate.window === target.window);
-                return duplicated ? [index] : [];
-            }));
-        const stagedDuration = Math.ceil(duration / 3);
+        const edges = entered === null ? new Map()
+            : calculateEdgeLayout(this._targets, this._fullLayout, entered.groupIndex, this._workArea);
+        if (entered !== null)
+            this.set_clip(this._workArea.x, this._workArea.y, this._workArea.width, this._workArea.height);
+        else
+            this.remove_clip();
 
         this._targets.forEach((target, index) => {
             const actor = this._targetActors[index];
             const geometry = enteredIndices.has(index)
                 ? entered.geometries.get(index)
-                : this._fullLayout.geometries.get(index);
-            const visible = entered === null || enteredIndices.has(index);
-            const staged = stagedDirectIndices.has(index);
-            if (visible)
-                actor.show();
-            actor.can_focus = visible && (entered === null
+                : edges.get(index) ?? this._fullLayout.geometries.get(index);
+            const active = entered === null || enteredIndices.has(index);
+            actor.show();
+            actor.can_focus = active && (entered === null
                 ? target.kind !== 'grouped-window'
                 : target.kind === 'grouped-window');
-            actor._clickGesture.set_enabled(visible && (target.kind !== 'app-group' || entered === null));
-            const onComplete = visible ? null : () => actor.hide();
+            actor._clickGesture.set_enabled(active && (target.kind !== 'app-group' || entered === null));
             const properties = {
                 x: geometry.x,
                 y: geometry.y,
                 width: geometry.width,
                 height: geometry.height,
-                opacity: visible ? 255 : 0,
+                opacity: 255,
             };
             if (lateChrome) {
-                this._setLateFadeProperties(actor, properties, animate, duration, onComplete);
-            } else if (staged && groupTransition.entering === false) {
-                this._setLateFadeProperties(actor, properties, animate, duration, onComplete);
+                this._setLateFadeProperties(actor, properties, animate, duration);
             } else {
                 this._setActorProperties(
-                    actor, properties, animate, staged ? stagedDuration : duration, onComplete);
+                    actor, properties, animate, duration);
             }
 
             if (target.kind === 'app-group') {
@@ -1002,14 +976,14 @@ class SwitcherView extends St.Widget {
                     actor, geometry, entered !== null, isEntered,
                     animate, duration, lateChrome);
             } else {
-                actor.reactive = visible;
-                actor._selectionLabel.reactive = visible;
+                actor.reactive = active;
+                actor._selectionLabel.reactive = active;
                 if (target.kind === 'direct-window') {
-                    actor._directIcon.reactive = visible;
+                    actor._directIcon.reactive = active;
                     this._positionDirectIcon(actor, geometry, animate);
                 }
                 const labelY = geometry.height + 8 * this._themeScale * geometry.chromeScale + (target.kind === 'direct-window'
-                    ? Math.min(DIRECT_ICON_SIZE * this._themeScale * geometry.chromeScale, geometry.height / 3, geometry.width) / 2
+                    ? DIRECT_ICON_SIZE * this._themeScale / 2
                     : 0);
                 this._positionLabel(actor._selectionLabel, geometry.width, labelY, geometry.chromeScale, animate);
             }
@@ -1019,13 +993,10 @@ class SwitcherView extends St.Widget {
             if (entry.clone === null)
                 continue;
             const target = this._targets[entry.targetIndex];
-            const visible = entered === null || enteredIndices.has(entry.targetIndex);
-            if (visible)
-                entry.clone.show();
-            const staged = stagedDirectIndices.has(entry.targetIndex);
+            entry.clone.show();
             const geometry = enteredIndices.has(entry.targetIndex)
                 ? entered.geometries.get(entry.targetIndex)
-                : this._fullLayout.geometries.get(entry.targetIndex);
+                : edges.get(entry.targetIndex) ?? this._fullLayout.geometries.get(entry.targetIndex);
             const destination = entry.surface === null
                 ? geometry
                 : destinationForSurface(target, entry.surface, geometry);
@@ -1040,38 +1011,16 @@ class SwitcherView extends St.Widget {
                 if (entry.surface !== null) {
                     this._rebasePreview(entry, destination, {
                         ...destination,
-                        opacity: visible ? 255 : 0,
+                        opacity: 255,
                     });
                 }
-                if (!visible)
-                    entry.clone.hide();
             };
-            const presentedProperties = {...properties, opacity: visible ? 255 : 0};
-            const backingChanges = entry.surface !== null &&
-                (entry.baseWidth !== Math.max(1, Math.round(destination.width)) ||
-                entry.baseHeight !== Math.max(1, Math.round(destination.height)));
-            if (!visible && backingChanges) {
-                this._setHiddenPreviewProperties(
-                    entry,
-                    presentedProperties,
-                    destination,
-                    animate,
-                    staged ? stagedDuration : duration);
-            } else if (staged && groupTransition.entering === false) {
-                this._setLateFadeProperties(
-                    entry.clone, presentedProperties, animate, duration, settle);
-            } else {
-                this._setActorProperties(
-                    entry.clone,
-                    presentedProperties,
-                    animate,
-                    staged ? stagedDuration : duration,
-                    settle);
-            }
+            this._setActorProperties(entry.clone, {...properties, opacity: 255}, animate, duration, settle);
         }
     }
 
     enterGroup(application) {
+        this._restackPickerPreviews();
         const entered = calculateEnteredLayout(this._targets, application, this._workArea, recordBounds, this._measureTitleHeights(), this._themeScale);
         this._targets.forEach((target, index) => {
             if (target.kind !== 'grouped-window' || target.application !== application)
@@ -1146,7 +1095,9 @@ class SwitcherView extends St.Widget {
                 });
             }
         });
-        this._clearActors();
+        this._clearActors(true);
+        this._presentation.retain(new Set(targets.flatMap(target =>
+            target.kind === 'app-group' ? [] : [target.window, ...target.auxiliarySurfaces])));
         this._targets = targets;
         this._targetActors = [];
         this._chromeActors = [];
@@ -1199,21 +1150,6 @@ class SwitcherView extends St.Widget {
         this._exitTargetIndex = index;
     }
 
-    _exitPreviewIndex() {
-        const target = this._targets[this._exitTargetIndex];
-        if (target === undefined)
-            return -1;
-        if (target.kind !== 'app-group')
-            return this._exitTargetIndex;
-        if (target.windows.length === 0)
-            return -1;
-        const window = target.windows[0].window;
-        return this._targets.findIndex(candidate =>
-            candidate.kind === 'grouped-window' &&
-            candidate.application === target.application &&
-            candidate.window === window);
-    }
-
     beginExit(onComplete) {
         this._disconnectWindowTitles();
         this._disconnectKeyFocus();
@@ -1240,22 +1176,8 @@ class SwitcherView extends St.Widget {
                 clone.remove_all_transitions();
         }
 
-        if (this._exitTargetIndex === null) {
-            if (!St.Settings.get().enable_animations) {
-                this.opacity = 0;
-                onComplete();
-                return;
-            }
-            this.remove_all_transitions();
-            this.ease({
-                opacity: 0,
-                duration: EXIT_TIME,
-                mode: Clutter.AnimationMode.EASE_OUT_QUAD,
-                onComplete,
-            });
-            return;
-        }
-
+        this.remove_clip();
+        this._followDesktopStack();
         for (const actor of this._chromeActors) {
             if (St.Settings.get().enable_animations) {
                 actor.ease({
@@ -1268,12 +1190,11 @@ class SwitcherView extends St.Widget {
             }
         }
 
-        const heroIndex = this._exitPreviewIndex();
         const exits = this._cloneEntries
             .filter(({clone}) => clone !== null)
             .map(entry => ({
                 entry,
-                sourceRect: entry.targetIndex === heroIndex && entry.source !== null
+                sourceRect: entry.source !== null && entry.source.visible && entry.surface.showing_on_its_workspace()
                     ? entry.source.get_meta_window().get_buffer_rect()
                     : null,
             }));
@@ -1335,9 +1256,12 @@ class SwitcherView extends St.Widget {
         }
     }
 
-    _clearActors() {
+    _clearActors(preservePreviews = false) {
+        this._disconnectDesktopStack();
         this._disconnectWindowTitles();
         this._disconnectSourceGeometry();
+        if (!preservePreviews && this._presentation !== null)
+            this._presentation.retain(new Set());
         for (const {actor, gesture, signal, sequenceSignal} of this._clickActions) {
             gesture.disconnect(signal);
             if (sequenceSignal !== 0)
@@ -1347,9 +1271,11 @@ class SwitcherView extends St.Widget {
         }
         this._clickActions = [];
         visitActorTree(this, actor => actor.remove_all_transitions());
-        for (const {clone, source, signal} of this._cloneEntries) {
-            if (signal !== 0)
-                source.disconnect(signal);
+        if (preservePreviews) {
+            for (const {clone, source} of this._cloneEntries) {
+                if (clone !== null && source !== null)
+                    this.remove_child(clone);
+            }
         }
         this._cloneEntries = [];
         this._targetActors = [];
@@ -1358,8 +1284,11 @@ class SwitcherView extends St.Widget {
     }
 
     destroy() {
+        this._disconnectDesktopStack();
         this._disconnectKeyFocus();
         this._disconnectTheme();
+        this._presentation.destroy();
+        this._presentation = null;
         this._clearActors();
         this._targets = Object.freeze([]);
         this._targetActors = [];
@@ -1369,7 +1298,6 @@ class SwitcherView extends St.Widget {
         this._workArea = null;
         this._enteredApplication = null;
         this._exitTargetIndex = null;
-        this._entranceTargetIndex = -1;
         this._activateTarget = null;
         this._enterGroupRequested = null;
         this._leaveGroupRequested = null;

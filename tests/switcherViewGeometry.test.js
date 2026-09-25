@@ -8,10 +8,11 @@ import test from 'node:test';
 import * as layout from '../switcherLayout.js';
 
 const source = readFileSync(new URL('../switcherView.js', import.meta.url), 'utf8');
+const presentationSource = readFileSync(new URL('../switcherPresentation.js', import.meta.url), 'utf8');
 
 class Actor {
     constructor(properties = {}) {
-        Object.assign(this, {x: 0, y: 0, width: 1, height: 1, scale_x: 1, scale_y: 1, opacity: 255, visible: true}, properties);
+        Object.assign(this, {x: 0, y: 0, width: 1, height: 1, scale_x: 1, scale_y: 1, rotation_angle_z: 0, opacity: 255, visible: true}, properties);
         this.children = [];
         this.signals = new Map();
         this.nextSignal = 0;
@@ -30,11 +31,16 @@ class Actor {
     set_position(x, y) { Object.assign(this, {x, y}); if (this.bufferRect) this.bufferRect = {...this.bufferRect, x, y}; }
     set_size(width, height) { Object.assign(this, {width, height}); if (this.bufferRect) this.bufferRect = {...this.bufferRect, width, height}; }
     add_child(child) { this.children.push(child); child.parent = this; }
+    remove_child(child) { this.children = this.children.filter(actor => actor !== child); child.parent = null; }
+    set_clip() {}
+    remove_clip() {}
     set_child(child) { this.add_child(child); }
     get_children() { return this.children; }
     contains(actor) { return actor === this || this.children.some(child => child.contains(actor)); }
     add_effect() {}
+    remove_effect() {}
     set_child_below_sibling() {}
+    set_child_above_sibling() {}
     remove_all_transitions() { this.transition = null; }
     remove_transition() { this.transition = null; }
     get_transition(name) {
@@ -88,13 +94,14 @@ function fixture({entered = false, animations = false, themeScale = 1} = {}) {
         remove(id) { assert.ok(pending.delete(id)); },
     };
     const stage = new Actor();
+    const display = Object.assign(new Actor(), {sort_windows_by_stacking: windows => windows});
     stage.get_key_focus = () => stage.key_focus ?? null;
     const dependencies = {
         ...layout,
         Actor,
         Atk: {Role: {MENU_ITEM: 'menu-item'}, StateType: {EXPANDED: 'expanded'}},
         Pango: {EllipsizeMode: {END: 'end'}},
-        global: {stage, compositor: {get_laters: () => laters}},
+        global: {stage, display, compositor: {get_laters: () => laters}},
         Meta: {LaterType: {BEFORE_REDRAW: 'before-redraw'}},
         St: {Settings: {get: () => ({enable_animations: animations})}, Widget: Actor, Bin: Actor, Icon: Actor, Button: class extends Actor {}},
         Clutter: {Actor, Clone: Actor, BinLayout: class {}, AnimationMode: {EASE_OUT_QUAD: 0}},
@@ -112,10 +119,11 @@ function fixture({entered = false, animations = false, themeScale = 1} = {}) {
         'previewProperties', 'recordBounds', 'destinationForSurface', 'visitActorTree']
         .map(name => source.match(new RegExp(`function ${name}\\([^]*?\\n}`))[0]).join('\n');
     const methods = ['_createClones', '_queueGeometryRefresh', '_disconnectSourceGeometry', '_refreshGeometry',
-        '_applyComposition', '_setActorProperties', '_rebasePreview', '_setHiddenPreviewProperties', 'beginExit', '_clearActors',
+        '_applyComposition', '_setActorProperties', '_rebasePreview', 'beginExit', '_clearActors',
         'build', '_disconnectKeyFocus', '_disconnectTheme', 'destroy', '_measureTitleHeights', '_positionLabel', '_positionDirectIcon', '_positionGroupChrome',
-        '_exitPreviewIndex', '_createUnavailableTarget', '_createIcon', 'enterGroup', 'leaveGroup', '_setLateFadeProperties',
+        '_createUnavailableTarget', '_createIcon', 'enterGroup', 'leaveGroup', '_setLateFadeProperties',
         '_createWindowTarget', '_queueTitleRefresh', '_disconnectWindowTitles', 'setTargets']
+        .concat(['_syncDesktopStack', '_followDesktopStack', '_disconnectDesktopStack', '_restackPickerPreviews'])
         .map(name => source.match(new RegExp(`    ${name}\\([^]*?\\n    }`))[0]).join('\n');
     const View = new Function(...Object.keys(dependencies), `${functions}\nreturn class extends Actor {${methods}};`)(...Object.values(dependencies));
     const parent = new Actor({x: 100, y: 100, width: 800, height: 600});
@@ -124,17 +132,25 @@ function fixture({entered = false, animations = false, themeScale = 1} = {}) {
     const application = {create_icon_texture: () => new Actor()};
     const window = Object.assign(new Actor(), {
         title: 'Old', get_title() { return this.title; },
+        showing_on_its_workspace: () => true,
         get_compositor_private: () => parent, get_buffer_rect: () => parent.bufferRect,
     });
     const record = {kind: 'direct-window', application,
         window,
-        auxiliarySurfaces: [{get_compositor_private: () => dialog.parent === null ? null : dialog, get_buffer_rect: () => dialog.bufferRect}]};
+        auxiliarySurfaces: [{showing_on_its_workspace: () => true, get_compositor_private: () => dialog.parent === null ? null : dialog, get_buffer_rect: () => dialog.bufferRect}]};
     for (const actor of [parent, dialog]) {
         actor.bufferRect = {x: actor.x, y: actor.y, width: actor.width, height: actor.height};
         actor.get_meta_window = () => ({get_buffer_rect: () => actor.bufferRect});
     }
+    const unrelated = new Actor({x: 100, y: 100, width: 800, height: 600});
+    unrelated.bufferRect = {x: 100, y: 100, width: 800, height: 600};
+    unrelated.get_meta_window = () => ({get_buffer_rect: () => unrelated.bufferRect});
+    const unrelatedRecord = {...record, auxiliarySurfaces: [], window: Object.assign(new Actor(), {
+        get_title: () => 'Old', showing_on_its_workspace: () => true,
+        get_compositor_private: () => unrelated, get_buffer_rect: () => unrelated.bufferRect,
+    })};
     const targets = entered
-        ? [record, {kind: 'app-group', application}, {...record, kind: 'grouped-window'}]
+        ? [unrelatedRecord, {kind: 'app-group', application}, {...record, kind: 'grouped-window'}]
         : [record];
     const targetActors = targets.map(() => {
         const actor = Object.assign(new Actor(), {
@@ -147,7 +163,7 @@ function fixture({entered = false, animations = false, themeScale = 1} = {}) {
         return actor;
     });
     const view = Object.assign(new View(), {
-        _themeContext: theme, _themeScale: themeScale, _themeSignalId: 0,
+        _themeContext: theme, _themeScale: themeScale, _themeSignalId: 0, _desktopStackSignalId: 0,
         _windowTitleSignals: new Map(),
         _pendingTitleLabels: new Set(), _titleLaterId: 0,
         _targets: targets, _targetActors: targetActors, _cloneEntries: [], _sourceGeometrySignals: new Map(), _geometryLaterId: 0,
@@ -165,6 +181,18 @@ function fixture({entered = false, animations = false, themeScale = 1} = {}) {
             this._refreshGeometry();
         },
     });
+    const Presentation = new Function('Clutter', 'GObject', `${presentationSource.replace(/^import .*;$/gm, '').replace('export class', 'class')}; return SwitcherPresentation;`)(
+        {Actor, Clone: Actor, Effect: class {}, BinLayout: class {}}, {registerClass: klass => klass});
+    view._presentation = new Presentation(() => ({}), (source, entry) => {
+        entry.targetActor._previewActors = entry.targetActor._previewActors.filter(actor => actor !== entry.clone);
+        const signals = view._sourceGeometrySignals.get(source);
+        if (signals) {
+            for (const signal of signals)
+                source.disconnect(signal);
+            view._sourceGeometrySignals.delete(source);
+            view._queueGeometryRefresh();
+        }
+    });
     for (const actor of targetActors)
         view.add_child(actor);
     view.build();
@@ -179,7 +207,7 @@ function fixture({entered = false, animations = false, themeScale = 1} = {}) {
         for (const callback of callbacks)
             assert.equal(callback(), false);
     }
-    return {view, parent, dialog, pending, flush, record, application, theme, stage};
+    return {view, parent, dialog, pending, flush, record, application, theme, stage, display};
 }
 
 function presented(entry) {
@@ -189,10 +217,21 @@ function presented(entry) {
 
 function near(actual, expected) { assert.ok(Math.abs(actual - expected) < 1e-8, `${actual} != ${expected}`); }
 
-test('title changes update direct and grouped window names and remeasure hidden labels without rebuilding', () => {
+test('desktop stacking subscription is released when an exiting view is destroyed', () => {
+    const {view, display} = fixture({animations: true});
+    assert.equal(display.signals.size, 0);
+    view.beginExit(() => {});
+    assert.equal(display.signals.size, 1);
+    view.destroy();
+    assert.equal(display.signals.size, 0);
+    view._syncDesktopStack = () => assert.fail('Destroyed view must not receive desktop restacks');
+    display.emit('restacked');
+});
+
+test('title changes update grouped window names and remeasure labels without rebuilding', () => {
     const {view, record, pending, flush} = fixture({entered: true});
-    const actors = [view._targetActors[0], view._targetActors[2]];
-    actors[1]._selectionLabel.visible = true;
+    const actors = [view._targetActors[2]];
+    actors[0]._selectionLabel.visible = true;
     const clones = view._cloneEntries.map(entry => entry.clone);
     for (const actor of actors) {
         assert.equal(actor._selectionLabel.text, 'Old');
@@ -205,9 +244,9 @@ test('title changes update direct and grouped window names and remeasure hidden 
     for (const actor of actors) {
         assert.equal(actor._selectionLabel.text, 'Updated title');
         assert.equal(actor.accessible_name, 'Updated title');
-        assert.equal(actor._selectionLabel.visible, actor === actors[1]);
+        assert.equal(actor._selectionLabel.visible, true);
     }
-    assert.equal(record.window.signals.size, 1, 'duplicate targets share a title subscription');
+    assert.equal(record.window.signals.size, 1);
     assert.equal(pending.size, 1);
     flush();
     for (const actor of actors) {
@@ -227,7 +266,7 @@ for (const phase of ['enter', 'return', 'entrance']) {
             view.enterGroup(application);
         else if (phase === 'entrance')
             view._applyComposition(true, 220, null, true);
-        const labels = [view._targetActors[0]._selectionLabel, view._targetActors[2]._selectionLabel];
+        const labels = [view._targetActors[2]._selectionLabel];
         for (const label of labels) {
             label.opacity = 17;
             label.transition.opacity = 255;
@@ -367,7 +406,7 @@ test('unchanged buffer notifications do not interrupt an active composition tran
 
 for (const animations of [false, true]) {
     for (const rebase of [false, true]) {
-        test(`out-of-scope previews hide after fade and return, animations=${animations}, rebase=${rebase}`, () => {
+        test(`out-of-scope previews remain visible but inactive at edges, animations=${animations}, rebase=${rebase}`, () => {
             const {view, application} = fixture({entered: true, animations});
             view.leaveGroup();
             for (const entry of view._cloneEntries) {
@@ -382,7 +421,12 @@ for (const animations of [false, true]) {
                     assert.equal(entry.clone.visible, true, 'stay visible during fade');
                 entry.clone.finishTransition();
                 entry.clone.finishTransition();
-                assert.equal(entry.clone.visible, entry.targetIndex === 2);
+                assert.equal(entry.clone.visible, true);
+                if (entry.targetIndex === 0) {
+                    assert.ok(entry.clone.x < view._workArea.x);
+                    assert.equal(entry.targetActor.reactive, false);
+                    assert.equal(entry.targetActor.can_focus, false);
+                }
             }
             view.leaveGroup();
             for (const entry of view._cloneEntries) {
@@ -397,7 +441,7 @@ for (const animations of [false, true]) {
 }
 
 for (const phase of [0, 1]) {
-    test(`return interrupts hidden preview two-step fade at phase ${phase}`, () => {
+    test(`return interrupts edge movement at phase ${phase}`, () => {
         const {view, application} = fixture({entered: true, animations: true});
         view.leaveGroup();
         const entry = view._cloneEntries[0];
@@ -417,15 +461,15 @@ for (const phase of [0, 1]) {
     });
 }
 
-test('already hidden previews rebase synchronously without remapping or starting a fade', () => {
+test('edge previews remain visible after rebasing', () => {
     const {view} = fixture({entered: true, animations: true});
     const entry = view._cloneEntries[0];
     entry.clone.hide();
     view._rebasePreview(entry, {width: 1000, height: 750});
     view._applyComposition(true);
-    assert.equal(entry.clone.visible, false);
-    assert.equal(entry.clone.transition, null);
-    assert.equal(entry.clone.opacity, 0);
+    assert.equal(entry.clone.visible, true);
+    entry.clone.finishTransition();
+    assert.equal(entry.clone.opacity, 255);
     view.destroy();
 });
 
@@ -443,17 +487,14 @@ for (const animations of [false, true]) {
             view._exitTargetIndex = targetIndex;
             let completed = 0;
             view.beginExit(() => completed++);
-            const heroIndex = targetIndex === 0 ? 0 : 2;
             for (const entry of view._cloneEntries) {
                 if (animations)
                     Object.assign(entry.clone, entry.clone.transition);
-                if (entry.targetIndex === heroIndex) {
-                    assert.equal(entry.clone.visible, true, 'exit hero must be shown even outside the entered scope');
+                {
+                    assert.equal(entry.clone.visible, true, 'every visible desktop window returns from the picker');
                     const rect = presented(entry);
                     for (const [property, expected] of Object.entries(entry.source.bufferRect))
                         near(rect[property], expected);
-                } else {
-                    assert.equal(entry.clone.opacity, 0);
                 }
                 if (animations)
                     entry.exitComplete();
@@ -525,25 +566,25 @@ test('attached dialog movement within unchanged bounds updates its relative posi
 
 test('entered layout and hidden full layout both follow resize and expanded dialog bounds', () => {
     const {view, parent, dialog, pending, flush, application} = fixture({entered: true});
-    const previousFull = view._fullLayout.geometries.get(0);
+    const previousFull = view._fullLayout.geometries.get(2);
     const previousEnteredWidth = view._targetActors[2].width;
     parent.set_size(400, 1000);
     dialog.set_position(-100, -50);
     parent.emit('notify::size');
     dialog.emit('notify::position');
     assert.equal(pending.size, 1, 'duplicate direct/grouped clones share one geometry subscription');
-    assert.equal(view._sourceGeometrySignals.size, 2);
+    assert.equal(view._sourceGeometrySignals.size, 3);
     assert.equal([...parent.signals.values()].filter(signal => signal.name === 'notify::size').length, 1);
     flush();
-    assert.notDeepEqual(view._fullLayout.geometries.get(0), previousFull);
+    assert.notDeepEqual(view._fullLayout.geometries.get(2), previousFull);
     assert.notEqual(view._targetActors[2].width, previousEnteredWidth);
     for (const entry of view._cloneEntries) {
         const rect = presented(entry);
         near(rect.width / rect.height, entry.source.width / entry.source.height);
-        assert.equal(entry.clone.opacity, entry.targetIndex === 2 ? 255 : 0);
+        assert.equal(entry.clone.opacity, 255);
     }
-    const main = presented(view._cloneEntries[2]);
-    const attached = presented(view._cloneEntries[3]);
+    const main = presented(view._cloneEntries[1]);
+    const attached = presented(view._cloneEntries[2]);
     near(main.x - attached.x, (parent.x - dialog.x) * main.width / parent.width);
     near(main.y - attached.y, (parent.y - dialog.y) * main.height / parent.height);
     assert.equal(view._selectedIndex, 2);
@@ -555,37 +596,37 @@ test('rebuild cleanup removes pending refreshes and subscriptions, then permits 
     const {view, parent, dialog, pending, record} = fixture();
     parent.set_size(810, 600);
     parent.emit('notify::size');
-    view._clearActors();
+    view._clearActors(true);
     assert.equal(pending.size, 0);
     assert.equal(view._sourceGeometrySignals.size, 0);
-    assert.equal(parent.signals.size, 0);
-    assert.equal(dialog.signals.size, 0);
+    assert.equal(parent.signals.size, 1, 'presentation keeps its source destruction subscription');
+    assert.equal(dialog.signals.size, 1);
     assert.equal(view._cloneEntries.length, 0);
     const target = Object.assign(new Actor(), {_previewActors: []});
     view._createClones(record, 0, {x: 0, y: 0, width: 400, height: 300}, target, null);
     parent.set_size(820, 600);
     parent.emit('notify::size');
     assert.equal(pending.size, 1);
-    view._clearActors();
-    view._clearActors();
+    view.destroy();
     assert.equal(parent.signals.size, 0);
 });
 
 for (const entered of [false, true]) {
     test(`destroying an outlying dialog refreshes surviving preview bounds, entered=${entered}`, () => {
         const {view, dialog, pending, flush} = fixture({entered});
-        const originalFull = view._fullLayout.geometries.get(0);
-        const index = entered ? 2 : 0;
+        const targetIndex = entered ? 2 : 0;
+        const originalFull = view._fullLayout.geometries.get(targetIndex);
+        const index = entered ? 1 : 0;
         const originalPreview = presented(view._cloneEntries[index]);
         dialog.set_position(-1000, -500);
         dialog.emit('notify::position');
         flush();
-        assert.notDeepEqual(view._fullLayout.geometries.get(0), originalFull);
+        assert.notDeepEqual(view._fullLayout.geometries.get(targetIndex), originalFull);
         dialog.destroy();
         assert.equal(pending.size, 1, 'source destruction schedules one deferred bounds refresh');
         assert.equal(view._cloneEntries[index + 1].clone, null);
         flush();
-        assert.deepEqual(view._fullLayout.geometries.get(0), originalFull);
+        assert.deepEqual(view._fullLayout.geometries.get(targetIndex), originalFull);
         assert.deepEqual(presented(view._cloneEntries[index]), originalPreview);
         view._clearActors();
         assert.equal(pending.size, 0);
@@ -619,11 +660,11 @@ for (const animations of [false, true]) {
     });
 }
 
-test('destroying a duplicated source releases all geometry signals and preview references', () => {
+test('destroying a grouped source releases its geometry signals and preview references', () => {
     const {view, parent, dialog, pending} = fixture({entered: true});
     parent.destroy();
     assert.equal(view._sourceGeometrySignals.has(parent), false);
-    for (const index of [0, 2]) {
+    for (const index of [1]) {
         assert.equal(view._cloneEntries[index].clone, null);
         assert.equal(view._cloneEntries[index].source, null);
         assert.equal(view._cloneEntries[index].signal, 0);
@@ -631,7 +672,7 @@ test('destroying a duplicated source releases all geometry signals and preview r
     assert.equal(view._targetActors[0]._previewActors.length, 1);
     assert.equal(view._targetActors[2]._previewActors.length, 1);
     assert.equal(pending.size, 1);
-    view._clearActors();
+    view.destroy();
     assert.equal(pending.size, 0, 'cleanup cancels the destruction-triggered refresh');
     dialog.destroy();
     assert.equal(pending.size, 0, 'sources cannot schedule work after cleanup');
@@ -683,7 +724,7 @@ for (const entered of [false, true]) {
         theme.emit('changed');
         flush();
         assert.deepEqual(view._fullLayout, oldLayout, 'returning to scale 1 restores the original layout');
-        assert.equal(view._targetActors[0]._directIcon.width, 48);
+        assert.equal(view._targetActors[0]._directIcon.width, 64);
         assert.equal(actor._selectionLabel.height, 20);
         view.destroy();
         assert.equal(theme.signals.size, 0);
@@ -694,19 +735,19 @@ test('HiDPI icon backing sizes and chrome positions apply theme scale exactly on
     const {view} = fixture({entered: true, themeScale: 2});
     const direct = view._targetActors[0]._directIcon;
     const directGeometry = view._fullLayout.geometries.get(0);
-    assert.equal(direct.width, 96);
-    near(direct.width * direct.scale_x, Math.min(96 * directGeometry.chromeScale, directGeometry.height / 3, directGeometry.width));
+    assert.equal(direct.width, 128);
+    near(direct.width * direct.scale_x, 128);
     near(direct.x + direct.width * direct.scale_x / 2, directGeometry.width / 2);
     const group = view._targetActors[1];
     const s = group._upChevron.scale_x;
     assert.ok(s > 0 && s <= 1);
-    assert.equal(group._iconBin.width, 240);
+    assert.equal(group._iconBin.width, 128);
     assert.equal(group._upChevron.width, 80);
     assert.equal(group._upChevron.height, 64);
     near(group._iconBin.scale_x, s);
     near(group._upChevron.x + 40 * s, group.width / 2);
     near(group._upChevron.y + 64 * s, group._iconBin.y);
-    near(group._selectionLabel.y, group._iconBin.y + 240 * s + 32 * s);
+    near(group._selectionLabel.y, group._iconBin.y + 128 * s + 32 * s);
     near(group._selectionLabel.scale_y, s, 'label uses shrink scale only');
     view._enteredApplication = null;
     view._applyComposition(false);
@@ -725,7 +766,7 @@ test('unavailable preview icons convert fitted stage dimensions back to logical 
     const geometry = view._fullLayout.geometries.get(0);
     view._createUnavailableTarget({...view._targets[0], application: null}, 0, geometry, view._targetActors[0]);
     const placeholder = view._cloneEntries.at(-1).clone;
-    const expectedSize = () => Math.max(1, Math.floor(Math.min(120, placeholder.width / theme.scale_factor, placeholder.height / theme.scale_factor)));
+    const expectedSize = () => Math.max(1, Math.floor(Math.min(64, placeholder.width / theme.scale_factor, placeholder.height / theme.scale_factor)));
     assert.equal(placeholder.child.icon_size, expectedSize());
     const original = placeholder.child.icon_size;
     theme.scale_factor = 1;

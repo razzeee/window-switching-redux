@@ -52,7 +52,7 @@ function createSession(t, action = Meta.KeyBindingAction.NONE) {
             delete globalThis.get_pointer;
     });
     const application = {name: 'Files'};
-    const records = Array.from({length: 6}, (_, index) => ({
+    const records = Array.from({length: 8}, (_, index) => ({
         window: {name: `W${index}`},
         auxiliarySurfaces: [],
         application: index % 2 === 0 ? application : null,

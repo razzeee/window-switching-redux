@@ -584,7 +584,7 @@ export async function testLifecycle(extension) {
         key(Clutter.KEY_Escape);
         await settle();
         assertClosed('Cancel after selected entered-group closure');
-        console.log('PASS: real selected entered-group closure preserves scope, selects its successor and removes duplicate representations');
+        console.log('PASS: real selected entered-group closure preserves scope, selects its successor and removes the closed window presentation');
 
         const closing = noModifier();
         await settle();

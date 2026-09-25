@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import test from 'node:test';
 
-import {calculateFullLayout, calculateGroupHorizontalLayout, CHEVRON_SIZE, DIRECT_ICON_SIZE} from '../switcherLayout.js';
+import {calculateFullLayout, CHEVRON_SIZE, DIRECT_ICON_SIZE} from '../switcherLayout.js';
 
 const viewSource = readFileSync(new URL('../switcherView.js', import.meta.url), 'utf8');
 const sessionSource = readFileSync(new URL('../switcherSession.js', import.meta.url), 'utf8');
@@ -136,7 +136,7 @@ test('accessible focus follows selection across collapsed and entered group scop
     assert.equal(focused, actors[1].children[2].children[0], 'exit leaves descendant focus alone too');
 });
 
-test('four narrow direct windows keep positioned icons within their own preview widths', () => {
+test('four narrow direct windows keep equal-sized centered icons without overlapping neighboring cells', () => {
     const method = viewSource.match(/    _positionDirectIcon\([^]*?\n    }/)[0];
     const position = new Function('DIRECT_ICON_SIZE', `return ({${method}})._positionDirectIcon;`)(DIRECT_ICON_SIZE);
     const targets = Array.from({length: 4}, () => ({kind: 'direct-window'}));
@@ -147,8 +147,8 @@ test('four narrow direct windows keep positioned icons within their own preview 
         position.call({_themeScale: 1, _setActorProperties: (icon, properties) => Object.assign(icon, properties)}, actor, geometry, false);
         const icon = actor._directIcon;
         const width = DIRECT_ICON_SIZE * icon.scale_x;
-        assert.ok(icon.x >= 0, 'icon must not protrude left of a narrow preview');
-        assert.ok(icon.x + width <= geometry.width + 1e-8, 'icon must not protrude right of a narrow preview');
+        assert.equal(width, 64);
+        assert.equal(icon.x + width / 2, geometry.width / 2);
         return {x: geometry.x + icon.x, right: geometry.x + icon.x + width};
     });
     assert.ok(icons[0].right < icons[1].x);
@@ -281,37 +281,9 @@ test('layout title heights come from styled labels including hidden application 
     assert.deepEqual(measure.call(view), {window: 128, app: 160});
 });
 
-test('group overlap leaves a smaller older preview visible and reactive', () => {
-    const widths = [1200, 300];
-    const layout = calculateGroupHorizontalLayout(widths, 88);
-    const newerRight = layout.previewX + layout.offsets[0] + widths[0];
-    const olderLeft = layout.previewX + layout.offsets[1];
-    const olderRight = olderLeft + widths[1];
-    const overlap = newerRight - olderLeft;
-
-    assert.ok(olderRight > newerRight, 'the older preview is fully covered by the newer target');
-    assert.ok(overlap >= widths[1] * 0.12);
-    assert.ok(overlap <= widths[1] * 0.18);
-});
-
-test('group app icon stays inside its activation region', () => {
-    const iconSize = 88;
-    const layout = calculateGroupHorizontalLayout([40, 400], iconSize);
-
-    assert.ok(layout.iconX >= 0);
-    assert.ok(layout.iconX + iconSize <= layout.width);
-});
-
-test('group app icon is centered beneath the complete group', () => {
-    const iconSize = 88;
-    const layout = calculateGroupHorizontalLayout([500, 300], iconSize);
-
-    assert.equal(layout.iconX, (layout.width - iconSize) / 2);
-});
-
 test('group transitions fade selected titles without replacing their geometry transition', () => {
     const lateOpacity = viewSource.match(
-        /\n    _setLateOpacity\([\s\S]*?\n    _setHiddenPreviewProperties/,
+        /\n    _setLateOpacity\([\s\S]*?\n    _rebasePreview/,
     )?.[0];
     const enterGroup = viewSource.match(
         /\n    enterGroup\([\s\S]*?\n    leaveGroup/,

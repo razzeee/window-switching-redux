@@ -11,7 +11,7 @@ result and relevant journal excerpt for every failure.
 | 5 windows | Eligible app groups appear | Not run |
 | 12 windows | Every frozen target fits | Not run |
 | 30 windows | Every target fits; keyboard remains usable | Not run |
-| Several windows from one app | One group contains all app windows | Not run |
+| Several windows from one app | One group contains only windows outside the recent four | Not run |
 | One window from many apps | Four recent direct targets, plus one group for each older app | Not run |
 | `F1,T1,F2,B1,T2,F3` | Traversal matches the design sequence | Not run |
 | Forward/reverse invocation and wrap | Reverse is the exact circular inverse | Not run |
@@ -21,18 +21,18 @@ result and relevant journal excerpt for every failure.
 | No focused window | Switcher uses the pointer's monitor | Not run |
 | Monitor disconnect, rotation, or resolution change while open/exiting | Presentation disappears synchronously without activation or stale modal capture | Not run |
 | Panel/dock reserved-space change without a monitor change while open or during commit/cancel exit | Presentation disappears synchronously with no additional activation or stale grab; reopening uses the new work area | Not run |
-| Small logical work area, including 448px height | Previews retain positive dimensions; scaled chrome fits within the monitor | Not run |
+| Small logical work area, including 448px height | Previews retain positive dimensions; icons remain 64 logical pixels; check crowded chrome | Not run |
 | Cross-workspace activation | Selected window's workspace activates | Not run |
 | Minimized/sticky/unassociated windows | Each remains reachable | Not run |
 | Unassociated window older than the four recent windows | Appears as an additional direct target, before app groups | Not run |
 | Attached dialog | Parent is one target; dialog travels in preview | Not run |
 | Nested attached dialogs | One root target; all attached surfaces stack correctly; forward invocation skips the current root | Not run |
-| Close direct target | Both representations disappear if duplicated | Not run |
+| Close direct target | Its single representation disappears; no group member is promoted | Not run |
 | Close grouped target | Selection follows traversal direction | Not run |
 | Close newest group window | Group stays selected with next destination | Not run |
 | Fast modifier tap | Activation does not wait for animation | Not run |
-| Switcher entrance | Starting preview transforms; every other preview fades in at its destination | Not run |
-| Commit selected window/group | Only the activated preview transforms to its source; every other preview fades | Not run |
+| Switcher entrance | Visible desktop windows transform into the grid without a second desktop copy | Not run |
+| Commit selected window/group | Visible windows return to desktop geometry; focus changes immediately | Not run |
 | Held traversal | Every key press advances exactly one target | Not run |
 | Forward rebound to Alt+Left or Alt+Space | Repeated presses advance forward without reversing or committing | Not run |
 | Forward rebound to Alt+Menu or Alt+Shift+F10 | Repeated presses advance despite focused widget popup-menu handling | Not run |
@@ -51,8 +51,8 @@ result and relevant journal excerpt for every failure.
 | Hover an individual preview in an entered group | That window becomes the shared selection; keyboard continues from it | Not run |
 | Expandable group chevrons | Every app group has a clickable down-chevron | Not run |
 | Multi-window group icon | The app icon and chevron are centered beneath the complete preview cluster | Not run |
-| Enter group by key/chevron | Only group windows remain and form a balanced gallery | Not run |
-| Accessible selection and scope | Selected target has key focus; out-of-scope targets are hidden/unfocusable after fading; inactive chevrons are hidden | Not run |
+| Enter group by key/chevron | Group windows form a centered grid; surrounding targets move to the edges | Not run |
+| Accessible selection and scope | Selected target has key focus; edge targets remain visible but inactive and unfocusable; inactive chevrons are hidden | Not run |
 | Accessible chevron focus and held confirmation | Focus alone preserves scope; Enter/Space operates the visible chevron once; holding the key does not activate a window | Not run |
 | Orca navigation and confirmation | Names, selected target and group context are announced; confirmation activates the announced destination | Not run |
 | Entered group window title | The selected title fades in near its destination instead of flying from outside the gallery | Not run |
@@ -60,13 +60,13 @@ result and relevant journal excerpt for every failure.
 | Left/Right traversal | Wraps backward/forward within the current navigation scope | Not run |
 | Entered group chrome | Up-chevron appears above the centered app icon | Not run |
 | Reverse group transition | Geometry continues from its interpolated position without jumping | Not run |
-| Duplicated window during group transition | Direct duplicate fades early on descent and late on return | Not run |
-| Interrupt staged duplicate fade | Reversing, committing, or cancelling leaves no late opacity change | Not run |
+| Single representation through group transition | Each window keeps the same live preview | Not run |
+| Interrupt edge transition | Reversing, committing, or cancelling leaves no jumps or stale source suppression | Not run |
 | Close entered group window | Gallery rebalances and scoped selection advances | Not run |
 | Close final entered window | Full composition returns without stale actors or chevrons | Not run |
 | Animations disabled | Enter, leave, and removal apply synchronously | Not run |
 | Long selected title | Pill is centered, natural-width, ellipsized, and preview-constrained | Not run |
-| Client changes a title while open or animating | Every duplicate label and accessible name updates without changing selection or interrupting animations | Not run |
+| Client changes a title while open or animating | Its label and accessible name update without changing selection or interrupting animations | Not run |
 | Long title after repeated enter/leave and interrupted transitions | Title grows with the preview instead of retaining its previous width | Not run |
 | Rebuild or disable while pointer is over a grouped preview | No cross-actor hover callbacks or destroyed-actor errors; rebuild does not steal selection | Not run |
 | Window preview corners | Live previews remain clipped to the selection outline's 12px radius during every transition | Not run |
@@ -80,14 +80,32 @@ result and relevant journal excerpt for every failure.
 
 ## Automated Coverage
 
-The pre-port baseline was verified on GNOME Shell/Mutter 50.4 on 2026-09-07
-with `npm run test:shell`. The GNOME 51 port still needs this runtime suite rerun,
-including rounded-preview transparency and clipping after offscreen resizes.
+The revised switcher was exercised on GNOME Shell/Mutter 51.0 on 2026-09-25
+in a Fedora 45 Podman container with software rendering and a headless monitor.
+The host remains on Shell 50.5. The container supplies mock login and power
+services, so these runs do not validate physical lock, suspend, or power behavior.
+Six-target grid and edge-context captures were also inspected using helper
+windows and two synthetic application identities.
+`npm test` passed all 235 tests, and `npm run test:shell` completed the full
+GNOME 51.0 suite. The container emitted desktop-service and background warnings;
+the suite reported no JavaScript exceptions or GJS critical diagnostics.
 These checks complement, rather than complete, the physical-desktop matrix:
 
 - Real virtual keyboard, pointer, and touchscreen events exercise shared
   selection, valid clicks with small movement, cancelled slides, chevrons,
   rebound Alt+Menu, modifier release, and explicit confirmation.
+- Stage pixel reads verify that an owned presentation removes its source's
+  desktop copy while preserving live clone content, and that releasing it
+  restores the desktop pixels. Minimized preview pixels remain available
+  without unminimizing the source. Source destruction releases the preview.
+  The live-content fixture changes a colored actor inside a real window actor;
+  it does not measure a continuously animating client application's frame rate.
+- A two-window Shell regression checks actual preview paint order against
+  compositor stacking during entrance, confirmation, quick switching, and a
+  restack arriving during exit. A Node lifecycle check verifies that destroying
+  the exiting view disconnects its desktop-stacking subscription. Re-recorded
+  keyboard usage confirms that quick switching no longer flashes an unrelated
+  foreground window before revealing the activated one.
 - The actual controller/session handles Escape, system-modal interruption,
   final-window closure, rapid reopen, and disable during open/exiting states.
 - Real system modals interrupt active sessions and detached commit/cancel exits.
@@ -118,7 +136,7 @@ These checks complement, rather than complete, the physical-desktop matrix:
   preview aspect ratio without changing selection. The fixture restores its
   original frame and keeps the helper alive through its D-Bus interface.
 - `npm test` additionally covers nested attached-dialog normalization/stacking,
-  no-modifier deadlines, controller signal ownership, and small-area layouts
+  no-modifier deadlines, controller signal ownership, and shared-grid layouts
   using pure functions and stubbed GNOME APIs.
 - Node regressions cover urgent-window MRU ordering, attached-dialog movement,
   entered-group geometry updates, and pending geometry-source cleanup.
@@ -134,14 +152,13 @@ These checks complement, rather than complete, the physical-desktop matrix:
   lookup becomes null while its clone survives. Full and entered galleries ignore
   source transforms; unchanged buffer notifications preserve active transitions.
   Entrance still uses transformed geometry, and exit still uses buffer rectangles.
-- Node preview regressions cover hiding with animations on/off, backing resize,
-  reversal during either fade step, hidden backing refresh, and showing an exit
-  hero that was outside the entered scope.
-- Real preview wrappers and their `Clutter.Clone` children are checked for unmapping
-  after group entry and remapping on return, including backing resize and an
-  interrupted return. Hidden backing resize does not remap the preview. These checks
-  do not measure client suspension, power use, or physical animation appearance.
-- A real `Meta.Window` title-signal fixture updates duplicate St labels and local
+- Node preview regressions cover edge placement with animations on/off, backing
+  resize, interrupted return, and returning visible desktop windows on exit.
+- Real preview wrappers and their `Clutter.Clone` children remain mapped through
+  group entry and return. Edge targets are nonreactive and unfocusable. Rebuilding
+  target controls retains the same live previews. These checks do not measure
+  client suspension, power use, or physical animation appearance.
+- A real `Meta.Window` title-signal fixture updates its St label and local
   ATK names, retargets active label animation endpoints, and preserves preview
   animations. It emits `notify::title` rather than renaming a client window.
   Node regressions additionally verify subscription and pending-refresh cleanup.

@@ -1,3 +1,8 @@
+/* Generated with AI for personal use.
+ * Do NOT upload to extensions.gnome.org (EGO) unless you understand JavaScript
+ * and can maintain this code.
+ */
+
 .switcher-backdrop {
   background-color: rgba(0, 0, 0, 0.35);
 }
@@ -34,8 +39,6 @@
 
 .switcher-app-icon {
   background-color: transparent;
-  border: 2px solid transparent;
-  border-radius: 12px;
 }
 
 .switcher-group-outline {
