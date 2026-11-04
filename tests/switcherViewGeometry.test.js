@@ -40,7 +40,10 @@ class Actor {
     add_effect() {}
     remove_effect() {}
     set_child_below_sibling() {}
-    set_child_above_sibling() {}
+    set_child_above_sibling(child, sibling) {
+        this.children = this.children.filter(actor => actor !== child);
+        this.children.splice(sibling === null ? this.children.length : this.children.indexOf(sibling) + 1, 0, child);
+    }
     remove_all_transitions() { this.transition = null; }
     remove_transition() { this.transition = null; }
     get_transition(name) {
@@ -216,6 +219,16 @@ function presented(entry) {
 }
 
 function near(actual, expected) { assert.ok(Math.abs(actual - expected) < 1e-8, `${actual} != ${expected}`); }
+
+test('group icon chrome is above every grouped window preview and selection actor', () => {
+    const {view} = fixture({entered: true});
+    view._restackPickerPreviews();
+    const children = view.get_children();
+    const group = view._targetActors[1];
+    for (const actor of [view._targetActors[2], ...view._targetActors[2]._previewActors, group._groupOutline])
+        assert.ok(children.indexOf(group) > children.indexOf(actor), 'group chrome must be topmost');
+    view.destroy();
+});
 
 test('desktop stacking subscription is released when an exiting view is destroyed', () => {
     const {view, display} = fixture({animations: true});

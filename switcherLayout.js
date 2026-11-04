@@ -63,7 +63,7 @@ function groupChrome(cell, previewHeight, themeScale, titleHeight, entered = fal
     return {
         x: cell.x, y: cell.y, width: cell.width,
         height: iconY + iconSize + (entered ? 16 : CHEVRON_SIZE + 24) * themeScale + titleHeight,
-        previewHeight, previewWidth: entered ? 0 : cell.width, previewX: 0,
+        previewHeight, previewWidth: entered ? 0 : cell.width, previewX: 0, previewY: 0,
         iconSize, iconX: (cell.width - iconSize) / 2, iconY, chromeScale: 1, rotation: 0,
     };
 }
@@ -95,6 +95,29 @@ export function calculateFullLayout(targets, workArea, getBounds, titleHeights, 
             geometry.rotation = slot === 0 ? 0 : slot % 2 ? -3 : 3;
             geometries.set(child.index, geometry);
         });
+        if (children.length > 0) {
+            const rectangles = children.map(child => {
+                const geometry = geometries.get(child.index);
+                const angle = geometry.rotation * Math.PI / 180;
+                const dx = geometry.width * Math.cos(angle);
+                const dy = geometry.width * Math.sin(angle);
+                const ex = -geometry.height * Math.sin(angle);
+                const ey = geometry.height * Math.cos(angle);
+                return {
+                    x: geometry.x + Math.min(0, dx) + Math.min(0, ex),
+                    y: geometry.y + Math.min(0, dy) + Math.min(0, ey),
+                    width: Math.abs(dx) + Math.abs(ex), height: Math.abs(dy) + Math.abs(ey),
+                };
+            });
+            const x = Math.min(...rectangles.map(rect => rect.x));
+            const y = Math.min(...rectangles.map(rect => rect.y));
+            Object.assign(geometries.get(index), {
+                previewX: x - cell.x,
+                previewY: y - cell.y,
+                previewWidth: Math.max(...rectangles.map(rect => rect.x + rect.width)) - x,
+                previewHeight: Math.max(...rectangles.map(rect => rect.y + rect.height)) - y,
+            });
+        }
         groups.push({target, index, children});
     }
     return {geometries, groups, cells};

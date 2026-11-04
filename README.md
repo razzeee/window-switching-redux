@@ -35,8 +35,8 @@ are removed. Forward invocation skips the starting window so a quick switch take
 you to the previous one. Attached dialogs share their root window's target.
 
 The switcher follows GNOME's existing `current-workspace-only` app-switcher
-setting. It appears on the focused window's monitor, or the pointer's monitor
-when no window is focused. Windows on other monitors remain selectable without
+setting. It appears on the pointer's monitor at invocation, independently of
+the focused window or workspace. Windows on other monitors remain selectable without
 dimming those desktops. Monitor or work-area changes dismiss the switcher;
 invoke it again to use the new layout.
 
