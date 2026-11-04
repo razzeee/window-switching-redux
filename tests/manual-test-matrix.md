@@ -16,8 +16,8 @@ result and relevant journal excerpt for every failure.
 | `F1,T1,F2,B1,T2,F3` | Traversal matches the design sequence | Not run |
 | Forward/reverse invocation and wrap | Reverse is the exact circular inverse | Not run |
 | Current-workspace-only on/off | Candidate scope follows stock app setting | Not run |
-| Two monitors, including staggered/portrait layouts | Full composition and entered groups stay on the starting window's monitor; other desktops are not dimmed | Not run |
-| Pointer on a different monitor than the focused window | Focused window's monitor wins; moving the pointer does not move the open switcher | Not run |
+| Two monitors, including staggered/portrait layouts | Full composition and entered groups stay on the pointer's monitor captured at invocation; other desktops are not dimmed | Not run |
+| Pointer on a different monitor than the focused window | Pointer's monitor wins, including after activating a window on another workspace/display; moving the pointer does not move the open switcher | Not run |
 | No focused window | Switcher uses the pointer's monitor | Not run |
 | Monitor disconnect, rotation, or resolution change while open/exiting | Presentation disappears synchronously without activation or stale modal capture | Not run |
 | Panel/dock reserved-space change without a monitor change while open or during commit/cancel exit | Presentation disappears synchronously with no additional activation or stale grab; reopening uses the new work area | Not run |

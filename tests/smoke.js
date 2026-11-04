@@ -819,7 +819,7 @@ export async function run() {
             target.kind === 'grouped-window' && target.application === targets[groupIndex].application);
         assert(childIndex >= 0, 'Helper group must contain a preview');
         const startingWindow = targets[childIndex].window;
-        const workArea = Main.layoutManager.getWorkAreaForMonitor(startingWindow.get_monitor());
+        const workArea = Main.layoutManager.getWorkAreaForMonitor(global.display.get_current_monitor());
         view = new SwitcherView(targets, startingWindow, () => {}, () => {}, () => {}, () => {}, () => {});
         Main.uiGroup.add_child(view);
         view.build();
@@ -828,6 +828,20 @@ export async function run() {
         assert(view._cloneEntries.some(entry => entry.source === startingWindow.get_compositor_private()),
             'Preview must clone the real helper window');
         assertWorkArea(view, workArea);
+        const children = view.get_children();
+        const groupActor = view._targetActors[groupIndex];
+        for (const member of view._fullLayout.groups.find(group => group.index === groupIndex).children) {
+            const actor = view._targetActors[member.index];
+            for (const preview of [...actor._previewActors, actor])
+                assert(children.indexOf(groupActor) > children.indexOf(preview), 'Group icon must paint above every stacked preview');
+        }
+        assert(children.indexOf(groupActor) > children.indexOf(groupActor._groupOutline), 'Group icon must paint above its outline');
+        const geometry = view._fullLayout.geometries.get(groupIndex);
+        assertNear(groupActor._groupOutline.x, geometry.x + geometry.previewX, 'Group outline follows stack horizontal bounds');
+        assertNear(groupActor._groupOutline.y, geometry.y + geometry.previewY, 'Group outline follows stack vertical bounds');
+        assertNear(groupActor._groupOutline.width, geometry.previewWidth, 'Group outline follows stack width');
+        assertNear(groupActor._groupOutline.height, geometry.previewHeight, 'Group outline follows stack height');
+        console.log('PASS: group icons paint above stacked previews and group outlines follow stack bounds');
         await testRoundedPixels(view);
         await testInitialLabels(view);
         await testTitleNotification(view);
@@ -857,7 +871,7 @@ export async function run() {
         Main.uiGroup.add_child(view);
         view.build();
         assertWorkArea(view, pointerWorkArea);
-        console.log(`PASS: starting-window work area and pointer fallback/backdrop (${Main.layoutManager.monitors.length} monitor(s))`);
+        console.log(`PASS: pointer work area and backdrop with and without a starting window (${Main.layoutManager.monitors.length} monitor(s))`);
         view.destroy();
         view = null;
         view = new SwitcherView(targets, startingWindow, () => {}, () => {}, () => {}, () => {}, () => {});

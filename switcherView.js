@@ -230,9 +230,7 @@ class SwitcherView extends St.Widget {
         this._exitTargetIndex = null;
         this._backdropActor = null;
         this._fullLayout = null;
-        let monitorIndex = startingWindow === null ? -1 : startingWindow.get_monitor();
-        if (monitorIndex < 0)
-            monitorIndex = global.display.get_current_monitor();
+        const monitorIndex = global.display.get_current_monitor();
         this._workArea = Main.layoutManager.getWorkAreaForMonitor(monitorIndex);
         this.set_size(global.stage.width, global.stage.height);
     }
@@ -551,7 +549,7 @@ class SwitcherView extends St.Widget {
             actor.remove_accessible_state(Atk.StateType.EXPANDED);
         const outlineProperties = {
             x: geometry.x + geometry.previewX,
-            y: geometry.y,
+            y: geometry.y + geometry.previewY,
             width: geometry.previewWidth,
             height: geometry.previewHeight,
             opacity: entered ? 0 : 255,
@@ -825,6 +823,8 @@ class SwitcherView extends St.Widget {
             }
             this.set_child_above_sibling(
                 this._targetActors[group.index]._groupOutline, sibling);
+            this.set_child_above_sibling(
+                this._targetActors[group.index], this._targetActors[group.index]._groupOutline);
         }
     }
 

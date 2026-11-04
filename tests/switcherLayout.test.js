@@ -17,6 +17,28 @@ const mixed = () => buildTraversal([
     record(), record(), record(), record(), record(app), record(app), record(other), record(other),
 ], 4);
 
+test('group outline tightly encloses rotated wide window previews', () => {
+    const targets = buildTraversal([record(app, 1600, 400), record(app, 1600, 400)], 0);
+    const full = calculateFullLayout(targets, area, bounds, titles);
+    const group = full.geometries.get(0);
+    const corners = full.groups[0].children.flatMap(({index}) => {
+        const g = full.geometries.get(index);
+        const angle = g.rotation * Math.PI / 180;
+        return [0, 1].flatMap(x => [0, 1].map(y => ({
+            x: g.x + x * g.width * Math.cos(angle) - y * g.height * Math.sin(angle),
+            y: g.y + x * g.width * Math.sin(angle) + y * g.height * Math.cos(angle),
+        })));
+    });
+    const minX = Math.min(...corners.map(p => p.x));
+    const minY = Math.min(...corners.map(p => p.y));
+    const maxX = Math.max(...corners.map(p => p.x));
+    const maxY = Math.max(...corners.map(p => p.y));
+    assert.ok(Math.abs(group.x + group.previewX - minX) < 3);
+    assert.ok(Math.abs(group.y + (group.previewY ?? 0) - minY) < 3);
+    assert.ok(Math.abs(group.previewWidth - (maxX - minX)) < 6);
+    assert.ok(Math.abs(group.previewHeight - (maxY - minY)) < 6);
+});
+
 function contained(rect, container) {
     assert.ok(rect.width > 0 && rect.height > 0);
     assert.ok(rect.x >= container.x - 1e-6 && rect.y >= container.y - 1e-6);

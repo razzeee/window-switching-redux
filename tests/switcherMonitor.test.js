@@ -43,7 +43,7 @@ try {
 }
 
 for (const focusedMonitor of [0, 1, -1, null]) {
-    test(`view captures focused monitor ${focusedMonitor}, not the combined desktop`, t => {
+    test(`view stays on the pointer display despite focused monitor ${focusedMonitor}`, t => {
         for (const property of ['stage', 'display']) {
             const previous = Object.getOwnPropertyDescriptor(globalThis, property);
             t.after(() => {
@@ -59,7 +59,7 @@ for (const focusedMonitor of [0, 1, -1, null]) {
         const startingWindow = focusedMonitor === null ? null : {get_monitor: () => focusedMonitor};
         const view = Object.create(SwitcherView.prototype);
         view._init([], startingWindow, () => {}, () => {}, () => {}, () => {});
-        const expected = focusedMonitor === null || focusedMonitor < 0 ? pointerMonitor : focusedMonitor;
+        const expected = pointerMonitor;
         assert.deepEqual(view._workArea, areas[expected]);
 
         pointerMonitor = 1 - expected;
