@@ -26,13 +26,21 @@ function groupTarget(application, records) {
     });
 }
 
+function countApplicationWindows(records) {
+    const applicationCounts = new Map();
+    for (const record of records)
+        applicationCounts.set(record.application, (applicationCounts.get(record.application) ?? 0) + 1);
+    return applicationCounts;
+}
+
 export function buildTraversal(windowRecords, recentLimit) {
     const records = windowRecords.map(freezeRecord);
     const targets = records.slice(0, recentLimit).map(directTarget);
     const groups = new Map();
+    const applicationCounts = countApplicationWindows(records);
 
     records.slice(recentLimit).forEach(record => {
-        if (record.application === null) {
+        if (record.application === null || applicationCounts.get(record.application) === 1) {
             targets.push(directTarget(record));
             return;
         }
@@ -122,23 +130,30 @@ export function moveSelection(selectedIndex, direction, targetCount) {
     return (selectedIndex + direction + targetCount) % targetCount;
 }
 
-function targetsMatch(first, second) {
-    if (first.kind !== second.kind)
-        return false;
-    if (first.kind === 'app-group')
-        return first.application === second.application;
-    return first.window === second.window;
+function targetsMatch(current, previous) {
+    if (previous.kind === 'app-group' && current.kind === 'direct-window')
+        return previous.windows.some(record => record.window === current.window);
+    if (current.kind === 'app-group' || previous.kind === 'app-group')
+        return current.kind === previous.kind && current.application === previous.application;
+    return current.window === previous.window;
 }
 
 function withoutWindow(targets, removedWindow) {
     const survivors = [];
+    const remainingWindows = targets.filter(target =>
+        target.kind !== 'app-group' && target.window !== removedWindow);
+    const applicationCounts = countApplicationWindows(remainingWindows);
 
     for (const target of targets) {
         if (target.kind === 'app-group') {
             const windows = target.windows.filter(record => record.window !== removedWindow);
-            if (windows.length > 0)
+            if (windows.length === 1 && applicationCounts.get(target.application) === 1)
+                survivors.push(directTarget(windows[0]));
+            else if (windows.length > 0)
                 survivors.push(groupTarget(target.application, windows));
         } else if (target.window !== removedWindow) {
+            if (target.kind === 'grouped-window' && applicationCounts.get(target.application) === 1)
+                continue;
             survivors.push(target);
         }
     }
@@ -147,22 +162,12 @@ function withoutWindow(targets, removedWindow) {
 }
 
 export function removeWindowFromTraversal(targets, selectedIndex, removedWindow, direction) {
-    const selectedTarget = targets[selectedIndex];
     const survivors = withoutWindow(targets, removedWindow);
-    if (survivors.length === 0)
-        return Object.freeze({targets: survivors, selectedIndex: -1});
-
-    const retainedSelection = survivors.findIndex(target => targetsMatch(target, selectedTarget));
-    if (retainedSelection !== -1)
-        return Object.freeze({targets: survivors, selectedIndex: retainedSelection});
-
-    for (let offset = 1; offset < targets.length; offset++) {
-        const candidateIndex = moveSelection(selectedIndex, direction * offset, targets.length);
-        const candidate = targets[candidateIndex];
-        const survivorIndex = survivors.findIndex(target => targetsMatch(target, candidate));
-        if (survivorIndex !== -1)
-            return Object.freeze({targets: survivors, selectedIndex: survivorIndex});
-    }
-
-    return Object.freeze({targets: survivors, selectedIndex: 0});
+    return Object.freeze({
+        targets: survivors,
+        selectedIndex: getScopedRemovalSelection(
+            targets, survivors, selectedIndex, direction,
+            targets.map((_, index) => index),
+            survivors.map((_, index) => index)),
+    });
 }

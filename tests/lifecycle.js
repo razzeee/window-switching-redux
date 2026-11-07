@@ -581,10 +581,30 @@ export async function testLifecycle(extension) {
         assert(removedActorDestroyed && !groupClosing._targets.some(candidate => candidate.window === removedWindow ||
             candidate.kind === 'app-group' && candidate.windows.some(record => record.window === removedWindow)),
             'Rebuild destroys the old target actor and removes every representation of the closed window');
+        console.log('PASS: real selected entered-group closure preserves scope, selects its successor and removes the closed window presentation');
+
+        const otherAppWindows = groupClosing._targets.filter(candidate => candidate.kind !== 'app-group' &&
+            candidate.application === closingGroup.application && candidate.window !== nextWindow).map(candidate => candidate.window);
+        for (const window of otherAppWindows) {
+            window.delete(global.get_current_time());
+            for (let attempt = 0; attempt < 20 && groupClosing._windowSignals.has(window); attempt++)
+                await settle();
+            assert(!groupClosing._windowSignals.has(window), 'Another application window really unmanaged');
+        }
+        await settle();
+        assert(assertOpen('Application reduced to one window') === groupClosing && groupClosing._view === groupView,
+            'Collapsing the group retains its session, view and modal grab');
+        assert(groupClosing._enteredApplication === null && groupView._enteredApplication === null,
+            'Single-window application leaves the entered scope');
+        assert(groupClosing._targets[groupClosing._selectedIndex].kind === 'direct-window' && selectedWindow(groupClosing) === nextWindow,
+            'The remaining application window becomes the selected direct target');
+        assert(groupView._selectedIndex === groupClosing._selectedIndex &&
+            !groupClosing._targets.some(candidate => candidate.kind === 'app-group' && candidate.application === closingGroup.application),
+            'View selection follows the collapsed group without a stale group target');
         key(Clutter.KEY_Escape);
         await settle();
         assertClosed('Cancel after selected entered-group closure');
-        console.log('PASS: real selected entered-group closure preserves scope, selects its successor and removes the closed window presentation');
+        console.log('PASS: real application reduced to one window leaves its group and retains direct-window selection');
 
         const closing = noModifier();
         await settle();

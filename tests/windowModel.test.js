@@ -155,15 +155,14 @@ test('a recent single-window application receives no app group', () => {
     assert.equal(targets.some(target => target.kind === 'app-group' && target.application === apps.Browser), false);
 });
 
-test('an older single-window application remains reachable through its app group', () => {
+test('an older single-window application remains a direct window', () => {
     const targets = buildTraversal([
         record('F1', 'Files'), record('T1', 'Text Editor'), record('F2', 'Files'),
         record('B1', 'Files'), record('U1', 'Browser'),
     ], 4);
 
-    assert.deepEqual(labels(targets).slice(-2), [
-        'Browser group',
-        'U1 grouped',
+    assert.deepEqual(labels(targets), [
+        'F1 direct', 'T1 direct', 'F2 direct', 'B1 direct', 'U1 direct',
     ]);
 });
 
@@ -283,3 +282,24 @@ test('a group disappears when its final remaining window closes', () => {
     assert.equal(group, undefined);
     assert.deepEqual(labels(result.targets), ['F1 direct', 'T1 direct', 'F2 direct', 'B1 direct']);
 });
+
+for (const direction of [-1, 1]) {
+    for (const recentLimit of [0, 1]) {
+        test(`closure collapses a single-window app in place, recent=${recentLimit}, direction=${direction}`, () => {
+            const targets = buildTraversal([
+                record('F1', 'Files'), record('F2', 'Files'), record('T1', 'Text Editor'),
+            ], recentLimit);
+            const groupIndex = targets.findIndex(target => target.kind === 'app-group');
+            const result = removeWindowFromTraversal(targets, groupIndex, windows.F1, direction);
+            const remaining = result.targets.find(target => target.window === windows.F2);
+            assert.equal(remaining.kind, 'direct-window');
+            assert.equal(result.targets.some(target => target.kind === 'app-group'), false);
+            assert.equal(result.targets[result.selectedIndex], remaining);
+            assert.deepEqual(getGroupIndices(result.targets, apps.Files), []);
+            const selected = getScopedRemovalSelection(targets, result.targets, groupIndex, direction,
+                getTopLevelIndices(targets), getTopLevelIndices(result.targets));
+            assert.equal(result.targets[selected], remaining);
+            assert.deepEqual(labels(result.targets), ['T1 direct', 'F2 direct']);
+        });
+    }
+}

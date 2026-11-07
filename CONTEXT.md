@@ -12,8 +12,9 @@ One of the four highest-ranked windows in the current most-recently-used order.
 _Avoid_: Exposed window, ungrouped window
 
 **Direct window target**:
-A switcher target representing one recent window, or an older window without
-an associated application, independently of any application group.
+A switcher target representing one recent window, or an older window from a
+single-window application or without an associated application, independently
+of any application group.
 _Avoid_: Window item, thumbnail
 
 **App group target**:
@@ -28,12 +29,16 @@ windows never also appear as grouped window targets.
 _Avoid_: Child item, nested window
 
 **Eligible application**:
-An application with at least one window outside the four recent windows. Its
-app group target contains only those remaining windows, including when just
-one remains.
+An application with multiple candidate windows and at least one window outside
+the four recent windows. Its app group target contains only those older windows.
+The group can contain one window if the application also has recent windows.
 
 **Switching session**:
-The interval from invoking a switching shortcut until a target is activated or switching is cancelled. Its window set and most-recently-used ranking are fixed when it begins, except that closed windows cease to be targets.
+The interval from invoking a switching shortcut until a target is activated or
+switching is cancelled. Its window set and most-recently-used ranking are fixed
+when it begins, except that closed windows cease to be targets. If an application
+is reduced to one window, its group becomes a direct target in the same position.
+An entered group then returns to the full composition with that window selected.
 
 **Starting window**:
 The focused window when a switching session begins. Its direct window target
@@ -64,8 +69,8 @@ but cannot receive selection or activation until the group is left.
 
 **Traversal sequence**:
 The circular order within a navigation scope. At the top level, recent windows
-in most-recently-used order are followed by older unassociated windows in that
-same order, then eligible applications in the order of each group's newest
-remaining window. Within an entered group, windows follow app-local
+in most-recently-used order are followed by older single-window application and
+unassociated windows in that same order, then eligible applications in the order
+of each group's newest remaining window. Within an entered group, windows follow app-local
 most-recently-used order. Reverse traversal is the inverse within each scope.
 _Avoid_: Tab order, focus order
