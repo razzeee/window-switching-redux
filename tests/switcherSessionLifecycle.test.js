@@ -113,6 +113,27 @@ const event = key => ({get_key_symbol: () => key, get_key_code: () => 42, get_st
 const press = (session, key) => assert.equal(session.vfunc_key_press_event(event(key)), true);
 const release = session => assert.equal(session.vfunc_key_release_event(event('Right')), true);
 
+for (const entered of [false, true]) {
+    for (const removed of [0, 1]) {
+        test(`single-window app closure restores direct selection, entered=${entered}, removed=${removed}`, t => {
+            const {session, view, windows} = start(t);
+            const application = {};
+            session._targets = buildTraversal(windows.map(window => ({window, application, auxiliarySurfaces: []})), 0);
+            session._selectedIndex = 0;
+            if (entered)
+                session._enterGroup(application);
+            windows[removed].emit('unmanaged');
+            assert.equal(session._enteredApplication, null);
+            assert.equal(session._targets.length, 1);
+            assert.equal(session._targets[session._selectedIndex].kind, 'direct-window');
+            assert.equal(session._targets[session._selectedIndex].window, windows[1 - removed]);
+            assert.deepEqual(view.calls.at(-2), ['leave']);
+            press(session, 'Return');
+            assert.equal(state.activations[0][0], windows[1 - removed]);
+        });
+    }
+}
+
 for (const synchronous of [false, true]) {
     test(`finish uses canonical cleanup after view handoff, synchronous=${synchronous}`, t => {
         const fixture = start(t);

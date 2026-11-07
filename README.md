@@ -14,8 +14,10 @@ source and manually remove the generated-code notices.
 The switcher shows targets in this order:
 
 1. Your four most recent windows, each selectable directly.
-2. Any older windows without an associated application, also selectable directly.
-3. Application groups for apps with at least one window outside the recent four.
+2. Older windows from single-window apps or without an associated application,
+   also selectable directly.
+3. Application groups for apps with multiple candidate windows and at least one
+   window outside the recent four.
 
 Each window appears once. Application groups contain only windows outside the
 recent four, and groups are ordered by their newest remaining member. Activating
@@ -31,7 +33,9 @@ to the left and right edges and remain partly visible but inactive. Leaving
 the group returns them to their original positions.
 
 Window order stays fixed while the switcher is open, except that closed windows
-are removed. Forward invocation skips the starting window so a quick switch takes
+are removed. If an app is reduced to one window, its group becomes a direct target
+in the same position. An entered group returns to the full grid with that window
+selected. Forward invocation skips the starting window so a quick switch takes
 you to the previous one. Attached dialogs share their root window's target.
 
 The switcher follows GNOME's existing `current-workspace-only` app-switcher

@@ -12,7 +12,7 @@ result and relevant journal excerpt for every failure.
 | 12 windows | Every frozen target fits | Not run |
 | 30 windows | Every target fits; keyboard remains usable | Not run |
 | Several windows from one app | One group contains only windows outside the recent four | Not run |
-| One window from many apps | Four recent direct targets, plus one group for each older app | Not run |
+| One window from many apps | Every window is a direct target, in most-recently-used order | Not run |
 | `F1,T1,F2,B1,T2,F3` | Traversal matches the design sequence | Not run |
 | Forward/reverse invocation and wrap | Reverse is the exact circular inverse | Not run |
 | Current-workspace-only on/off | Candidate scope follows stock app setting | Not run |
@@ -30,6 +30,8 @@ result and relevant journal excerpt for every failure.
 | Close direct target | Its single representation disappears; no group member is promoted | Not run |
 | Close grouped target | Selection follows traversal direction | Not run |
 | Close newest group window | Group stays selected with next destination | Not run |
+| Close an app's penultimate window, including a recent window | Remaining grouped window becomes a direct target in the group's position; selected group retains selection on that window | Not run |
+| Close an entered app's penultimate window | Full composition returns with the surviving direct window selected; confirmation activates it | Not run |
 | Fast modifier tap | Activation does not wait for animation | Not run |
 | Switcher entrance | Visible desktop windows transform into the grid without a second desktop copy | Not run |
 | Commit selected window/group | Visible windows return to desktop geometry; focus changes immediately | Not run |
@@ -79,6 +81,12 @@ result and relevant journal excerpt for every failure.
 | Competing switcher extension | Last-writer-wins limitation is observed | Not run |
 
 ## Automated Coverage
+
+On 2026-11-07, all 245 Node tests and the full headless GNOME Shell/Mutter 51.1
+suite passed. New closure regressions cover single-window application collapse,
+selection retention, leaving an entered group, and confirmation. The Shell suite
+also closes real client windows until one remains and verifies direct selection.
+Physical-desktop scenarios above remain unverified.
 
 The revised switcher was exercised on GNOME Shell/Mutter 51.0 on 2026-09-25
 in a Fedora 45 Podman container with software rendering and a headless monitor.

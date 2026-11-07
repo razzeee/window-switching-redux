@@ -76,7 +76,7 @@ test('small source windows upscale independently while icons keep their logical 
 
 test('stack footprint is independent of its window count and every member preserves aspect', () => {
     let footprint;
-    for (const count of [1, 3, 30]) {
+    for (const count of [2, 3, 30]) {
         const targets = buildTraversal(Array.from({length: count}, (_, i) => record(app, i % 2 ? 400 : 800, 600)), 0);
         const full = calculateFullLayout(targets, area, bounds, titles);
         const group = full.geometries.get(0);
