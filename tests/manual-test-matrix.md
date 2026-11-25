@@ -51,7 +51,8 @@ result and relevant journal excerpt for every failure.
 | Move pointer onto empty space | Last selection remains | Not run |
 | Hover/click a collapsed grouped preview | Whole group is selected/activated; no automatic group entry | Not run |
 | Hover an individual preview in an entered group | That window becomes the shared selection; keyboard continues from it | Not run |
-| Expandable group chevrons | Every app group has a clickable down-chevron | Not run |
+| Collapsed group with one grouped window | No down-chevron appears; the selected group label sits below the app icon without a gap for the arrow | Not run |
+| Collapsed group with two or more grouped windows | A clickable down-chevron appears below the app icon; the selected group label sits below the chevron | Not run |
 | Multi-window group icon | The app icon and chevron are centered beneath the complete preview cluster | Not run |
 | Enter group by key/chevron | Group windows form a centered grid; surrounding targets move to the edges | Not run |
 | Accessible selection and scope | Selected target has key focus; edge targets remain visible but inactive and unfocusable; inactive chevrons are hidden | Not run |
