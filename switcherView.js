@@ -525,7 +525,7 @@ class SwitcherView extends St.Widget {
     }
 
     _positionGroupChrome(
-        actor, geometry, entered, isEntered, animate,
+        actor, geometry, entered, isEntered, memberCount, animate,
         duration = TRANSITION_TIME, lateFade = false) {
         const backingSize = ICON_SIZE * this._themeScale;
         const iconScale = geometry.iconSize / backingSize;
@@ -535,7 +535,8 @@ class SwitcherView extends St.Widget {
         const chevronX = iconX + (geometry.iconSize - (CHEVRON_SIZE + 16) * spacingScale) / 2;
         const downChevronY = geometry.iconY + geometry.iconSize + 8 * spacingScale;
         const upChevronY = geometry.iconY - (CHEVRON_SIZE + 8) * spacingScale;
-        for (const [button, visible] of [[actor._downChevron, !entered], [actor._upChevron, isEntered]]) {
+        const showDown = !entered && memberCount > 1;
+        for (const [button, visible] of [[actor._downChevron, showDown], [actor._upChevron, isEntered]]) {
             button.reactive = visible;
             button.can_focus = visible;
             if (visible)
@@ -574,8 +575,8 @@ class SwitcherView extends St.Widget {
                 height: (CHEVRON_SIZE + 8) * this._themeScale,
                 scale_x: chromeScale,
                 scale_y: chromeScale,
-                opacity: entered ? 0 : 255,
-            }, animate, duration, entered ? () => actor._downChevron.hide() : null);
+                opacity: showDown ? 255 : 0,
+            }, animate, duration, showDown ? null : () => actor._downChevron.hide());
         this._setActorProperties(
             actor._upChevron, {
                 x: chevronX,
@@ -589,7 +590,7 @@ class SwitcherView extends St.Widget {
         this._positionLabel(
             actor._selectionLabel,
             geometry.width,
-            downChevronY + (isEntered ? 8 : CHEVRON_SIZE + 16) * spacingScale,
+            downChevronY + (showDown ? CHEVRON_SIZE + 16 : 8) * spacingScale,
             chromeScale,
             animate);
     }
@@ -973,7 +974,7 @@ class SwitcherView extends St.Widget {
                 const isEntered = entered !== null && index === entered.groupIndex;
                 actor.reactive = entered === null || isEntered;
                 this._positionGroupChrome(
-                    actor, geometry, entered !== null, isEntered,
+                    actor, geometry, entered !== null, isEntered, target.windows.length,
                     animate, duration, lateChrome);
             } else {
                 actor.reactive = active;

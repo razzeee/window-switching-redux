@@ -153,7 +153,7 @@ function fixture({entered = false, animations = false, themeScale = 1} = {}) {
         get_compositor_private: () => unrelated, get_buffer_rect: () => unrelated.bufferRect,
     })};
     const targets = entered
-        ? [unrelatedRecord, {kind: 'app-group', application}, {...record, kind: 'grouped-window'}]
+        ? [unrelatedRecord, {kind: 'app-group', application, windows: [record]}, {...record, kind: 'grouped-window'}]
         : [record];
     const targetActors = targets.map(() => {
         const actor = Object.assign(new Actor(), {
@@ -768,7 +768,10 @@ test('HiDPI icon backing sizes and chrome positions apply theme scale exactly on
     near(group._iconBin.width * group._iconBin.scale_x, geometry.iconSize);
     near(group._downChevron.y, geometry.iconY + geometry.iconSize + 16 * geometry.chromeScale);
     near(group._downChevron.x + group._downChevron.width * group._downChevron.scale_x / 2, group.width / 2);
-    near(group._selectionLabel.y, group._downChevron.y + 80 * geometry.chromeScale);
+    assert.equal(group._downChevron.visible, false, 'A collapsed group with one member has no down arrow');
+    assert.equal(group._downChevron.can_focus, false);
+    assert.equal(group._downChevron.reactive, false);
+    near(group._selectionLabel.y, group._downChevron.y + 16 * geometry.chromeScale);
     view.destroy();
 });
 

@@ -185,25 +185,30 @@ test('confirmation activates only a visible, reactive, focusable chevron owned b
     assert.deepEqual(calls, [application, null]);
 });
 
-test('group composition makes only the active scope chevron focusable', () => {
+test('group composition makes only the active scope chevron focusable and keeps its label clear', () => {
     const method = viewSource.match(/    _positionGroupChrome\([^]*?\n    }/)[0];
     const position = new Function('ICON_SIZE', 'CHEVRON_SIZE', 'TRANSITION_TIME', 'Atk',
         `return ({${method}})._positionGroupChrome;`)(120, CHEVRON_SIZE, 180, {StateType: {EXPANDED: 1}});
     const button = () => ({show() { this.visible = true; }, hide() { this.visible = false; }, fake_release() {}});
-    const actor = {_downChevron: button(), _upChevron: button(), _groupOutline: {}, _iconBin: {},
+    const actor = {_downChevron: button(), _upChevron: button(), _groupOutline: {}, _iconBin: {}, _selectionLabel: {},
         add_accessible_state() {}, remove_accessible_state() {}};
-    const view = {_themeScale: 1, _positionLabel() {},
+    const view = {_themeScale: 2, _positionLabel(label, _width, y) { label.y = y; },
         _setActorProperties(target, properties, _animate, _duration, complete = null) {
             Object.assign(target, properties);
             complete?.();
         }};
     const geometry = {x: 0, y: 0, width: 120, iconSize: 120, chromeScale: 1, iconX: 0, iconY: 32, previewX: 0, previewWidth: 0, previewHeight: 0};
     for (const [entered, isEntered, down, up] of [[false, false, true, false], [true, true, false, true], [true, false, false, false], [false, false, true, false]]) {
-        position.call(view, actor, geometry, entered, isEntered, false);
+        position.call(view, actor, geometry, entered, isEntered, 2, false);
         for (const [chevron, expected] of [[actor._downChevron, down], [actor._upChevron, up]]) {
             assert.equal(chevron.can_focus, expected);
             assert.equal(chevron.reactive, expected);
             assert.equal(chevron.visible, expected);
+        }
+        if (down) {
+            const arrow = actor._downChevron;
+            const bottom = arrow.y + arrow.height * arrow.scale_y;
+            assert.equal(actor._selectionLabel.y - bottom, 8 * view._themeScale * geometry.chromeScale);
         }
     }
 });
